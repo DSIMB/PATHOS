@@ -1,0 +1,14 @@
+# Example input file for PATHOS query script
+
+# Query all mutations for these proteins
+P16501
+Q9Y6X3
+
+# Query specific mutations
+P10635 M1A R56V
+Q9Y6X4 M1C A100T W695F
+
+# Lines starting with # are comments and will be ignored
+# Empty lines are also ignored
+
+# Format: UniProtID [mutation1] [mutation2] ...
