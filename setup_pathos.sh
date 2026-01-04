@@ -26,12 +26,15 @@ wget -c "$ZENODO_ARCHIVE_URL" -O zenodo_archive.zip
 echo "Extracting archive..."
 unzip -o zenodo_archive.zip && rm zenodo_archive.zip
 
-# 5. Extract nested archives (MSAs.zip, mmseqs_db.zip)
+# 5. Extract nested archives (MSAs.zip, mmseqs_db.zip, uniprot.zip)
 if [ -f MSAs.zip ]; then
     unzip -o MSAs.zip && rm MSAs.zip
 fi
 if [ -f mmseqs_db.zip ]; then
     unzip -o mmseqs_db.zip && rm mmseqs_db.zip
+fi
+if [ -f uniprot.zip ]; then
+    unzip -o uniprot.zip && rm uniprot.zip
 fi
 
 cd ..
