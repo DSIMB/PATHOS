@@ -107,9 +107,8 @@ Full list of available options for `run_pathos.py`.
 
 If you use PATHOS in your research, please cite:
 
-```
 Radjasandirane, R., Cretin, G., Diharce, J., de Brevern, A. G., & Gelly, J. C. (2025). PATHOS: Predicting Variant Pathogenicity by Combining Protein Language Models and Biological Features. medRxiv, 2025-12.
-```
+
 
 ## Contact
 
