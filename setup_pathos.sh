@@ -13,7 +13,7 @@ echo "=== PATHOS Setup ==="
 
 # 1. Create conda environment
 echo "Creating conda environment..."
-conda env create -f env/env_idris.yml
+conda env create -f env/PATHOS_env.yml
 
 # 2. Change to database directory
 cd "$DATABASE_DIR"
@@ -41,5 +41,5 @@ cd ..
 
 echo ""
 echo "=== Setup complete ==="
-echo "Activate the environment with: conda activate test_idris2"
+echo "Activate the environment with: conda activate PATHOS_env"
 echo "Test with: python run_pathos.py -i example_input.txt -o test_output.csv"
