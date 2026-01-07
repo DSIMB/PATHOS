@@ -6,7 +6,7 @@ PATHOS predicts pathogenicity of protein variants using protein language models 
 
 Set up PATHOS with a single script that installs dependencies and downloads the database.
 
-**Prerequisites:** Linux, Conda, wget, unzip, ~35 GB disk space
+**Prerequisites:** ~35 GB disk space
 
 ```bash
 git clone https://github.com/DSIMB/PATHOS.git
