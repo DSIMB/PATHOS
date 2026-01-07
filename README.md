@@ -1,6 +1,6 @@
 # PATHOS - Protein variant Analysis Through Human-Optimized Scoring
 
-PATHOS predicts pathogenicity of protein variants using protein language models (ESM-C 600M, Ankh2 Large, ESM2). Pre-computed scores for 139M+ variants across 17,574 human proteins.
+PATHOS predicts pathogenicity of protein variants using protein language models (ESM-C 600M, Ankh2 Large). Pre-computed scores for 139M+ variants across 17,574 human proteins.
 
 ## Installation
 
