@@ -12,7 +12,7 @@ Set up PATHOS with a single script that installs dependencies and downloads the 
 git clone https://github.com/DSIMB/PATHOS.git
 cd PATHOS
 ./setup_pathos.sh
-conda activate test_idris2
+conda activate pathos_env
 ```
 
 
