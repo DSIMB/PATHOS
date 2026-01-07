@@ -5,8 +5,10 @@ P16501
 Q9Y6X3
 
 # Query specific mutations
-P10635 M1A R56V
-Q9Y6X4 M1C A100T W695F
+P51787 M1R
+P06401 L889D
+P04637 R175H R248Q R273H
+P30536 T147A
 
 # Lines starting with # are comments and will be ignored
 # Empty lines are also ignored
