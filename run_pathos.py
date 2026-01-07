@@ -874,13 +874,7 @@ def load_string_scores_batch(protein_ids: List[str], data_dir: str) -> Dict[str,
     """
     string_scores = {pid: np.nan for pid in protein_ids}
     
-    # Try multiple STRING data locations
-    string_paths = [
-        "/dsimb/wasabi/radjasan/these/STRING/prot_prop.tsv",
-        os.path.join(data_dir, "STRING", "prot_prop.tsv"),
-        os.path.join(data_dir, "string_scores.tsv")
-    ]
-    string_path = os.path.join(data_dir, "STRING", "STIRNG_prot.tsv")
+    string_path = os.path.join(data_dir, "STIRNG_prot.tsv")
      # Load entire file once
     df = pd.read_csv(string_path, sep='\t', names=["ID", "STRING"], header=None)
     # Create lookup dict from dataframe
