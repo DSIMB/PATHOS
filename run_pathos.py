@@ -880,79 +880,19 @@ def load_string_scores_batch(protein_ids: List[str], data_dir: str) -> Dict[str,
         os.path.join(data_dir, "STRING", "prot_prop.tsv"),
         os.path.join(data_dir, "string_scores.tsv")
     ]
+    string_path = os.path.join(data_dir, "STRING", "STIRNG_prot.tsv")
+     # Load entire file once
+    df = pd.read_csv(string_path, sep='\t', names=["ID", "STRING"], header=None)
+    # Create lookup dict from dataframe
+    string_dict = dict(zip(df['ID'], df['STRING']))
     
-    for string_path in string_paths:
-        if not os.path.exists(string_path):
-            continue
-        
-        try:
-            # Load entire file once
-            if string_path.endswith("prot_prop.tsv"):
-                df = pd.read_csv(string_path, sep='\t', names=["ID", "STRING"], header=None)
-            else:
-                df = pd.read_csv(string_path, sep='\t')
-            
-            if 'ID' in df.columns and 'STRING' in df.columns:
-                # Create lookup dict from dataframe
-                string_dict = dict(zip(df['ID'], df['STRING']))
+    # Update scores for requested proteins
+    for pid in protein_ids:
+        if pid in string_dict:
+            string_scores[pid] = float(string_dict[pid])
                 
-                # Update scores for requested proteins
-                for pid in protein_ids:
-                    if pid in string_dict:
-                        string_scores[pid] = float(string_dict[pid])
-                
-                break  # Found the file, stop searching
-                
-        except Exception as e:
-            continue
     
     return string_scores
-
-
-def load_string_score(protein_id: str, data_dir: str) -> float:
-    """Load STRING interaction score for a protein
-    
-    Args:
-        protein_id: UniProt ID
-        data_dir: Base data directory
-    
-    Returns:
-        STRING interaction score or default value if not found
-    """
-    # Try multiple STRING data locations
-    string_paths = [
-        "/dsimb/wasabi/radjasan/these/STRING/prot_prop.tsv",
-        os.path.join(data_dir, "STRING", "prot_prop.tsv"),
-        os.path.join(data_dir, "string_scores", f"{protein_id}_string.txt"),
-        os.path.join(data_dir, "string_scores.tsv")
-    ]
-    
-    for string_path in string_paths:
-        if not os.path.exists(string_path):
-            continue
-            
-        try:
-            if string_path.endswith("prot_prop.tsv"):
-                df = pd.read_csv(string_path, sep='\t', names=["ID", "STRING"], header=None)
-                match = df[df['ID'] == protein_id]
-                if not match.empty:
-                    return float(match.iloc[0]['STRING'])
-            
-            elif string_path.endswith(f"{protein_id}_string.txt"):
-                with open(string_path, 'r') as f:
-                    return float(f.read().strip())
-            
-            else:
-                df = pd.read_csv(string_path, sep='\t')
-                if 'ID' in df.columns and 'STRING' in df.columns:
-                    match = df[df['ID'] == protein_id]
-                    if not match.empty:
-                        return float(match.iloc[0]['STRING'])
-        except Exception as e:
-            continue
-    
-    return np.nan
-
 
 def _process_variant_worker(args):
     """Worker function for parallel variant processing (module-level for pickling)
