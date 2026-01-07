@@ -10,6 +10,15 @@ P06401 L889D
 P04637 R175H R248Q R273H
 P30536 T147A
 
+# De novo predictions
+
+Q96L58  P36T
+Q9NVI7  R218W
+B1AK53  R113C
+Q9Y6Y1  I589V
+Q9Y6Y1  R1135W
+Q9P2R6  H1272R
+
 # Lines starting with # are comments and will be ignored
 # Empty lines are also ignored
 
