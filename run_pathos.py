@@ -10,8 +10,8 @@ Usage:
     python run_pathos.py --input variants.txt --output results.csv
     
 Input format:
-    P16501 M1A R56V    # Specific mutations
-    Q9Y6X3 M1C         # Single mutation
+    P16501 M1A R56V    
+    Q9Y6X3 M1C         
 """
 
 import argparse
@@ -56,11 +56,14 @@ GFF_FOLDER = os.path.join(SCRIPT_DIR, "database", "uniprot")
 STRING_PATH = os.path.join(SCRIPT_DIR, "database", "STRING_prot.tsv")
 
 # Checks if all required paths exist
-REQUIRED_PATHS = [DB_PATH, AF_SQLITE_PATH, FASTA_PATH, TREE_PATH, MSA_FOLDER, MAMMALS_DB, MODELS_FOLDER, STRING_PATH]   
+REQUIRED_PATHS = [DB_PATH, AF_SQLITE_PATH, FASTA_PATH,
+                TREE_PATH, MSA_FOLDER, MAMMALS_DB,
+                MODELS_FOLDER, STRING_PATH]   
 for path in REQUIRED_PATHS:
     if not os.path.exists(path):
         print(f"ERROR: Required path not found: {path}")
         sys.exit(1)
+
 # Trained model checkpoint files
 TRAINED_MODELS = {
     "ankh2_large": "PATHOS_ankh2.ckpt",
@@ -450,16 +453,23 @@ def compute_pastml_score(protein_id: str, mutation: str, msa_folder: str,
             if fasta_folder and mammals_db:
                 msa_file = generate_msa_with_mmseqs(protein_id, fasta_folder, msa_folder, mammals_db)
                 if not msa_file:
-                    return np.nan  # MSA generation failed
+                    print(f"      [PASTML] {protein_id}_{mutation}: NaN - MSA generation with mmseqs2 failed")
+                    return np.nan
             else:
-                return np.nan  # No MSA available
+                print(f"      [PASTML] {protein_id}_{mutation}: NaN - No MSA available and no fasta_folder/mammals_db provided")
+                return np.nan
         
         dict_fasta = get_msa_fasta(msa_file)
-        if not dict_fasta or "Homo_sapiens" not in dict_fasta:
+        if not dict_fasta:
+            print(f"      [PASTML] {protein_id}_{mutation}: NaN - MSA file is empty or could not be parsed")
+            return np.nan
+        if "Homo_sapiens" not in dict_fasta:
+            print(f"      [PASTML] {protein_id}_{mutation}: NaN - Homo_sapiens not found in MSA")
             return np.nan
         
         # Create annotation file
         if not create_pastml_annotation(dict_fasta, protein_id, mutation, annotation_dir):
+            print(f"      [PASTML] {protein_id}_{mutation}: NaN - Failed to create annotation file (position may be out of range)")
             return np.nan
         
         # Prune tree
@@ -468,11 +478,13 @@ def compute_pastml_score(protein_id: str, mutation: str, msa_folder: str,
         pruned_tree = prune_phylo_tree(tree, msa_organisms, pruned_tree_file)
         
         if pruned_tree is None:
+            print(f"      [PASTML] {protein_id}_{mutation}: NaN - Tree pruning failed (fewer than 2 organisms overlap with tree)")
             return np.nan
         
         # Run PASTML
         annot_file = os.path.join(annotation_dir, f"{protein_id}_{mutation}_annot.csv")
         if not run_pastml_inference(pruned_tree_file, annot_file, annotation_dir):
+            print(f"      [PASTML] {protein_id}_{mutation}: NaN - PASTML inference failed")
             return np.nan
     
     # Read probability from output
@@ -497,6 +509,7 @@ def compute_pastml_score(protein_id: str, mutation: str, msa_folder: str,
         return float(prob)
         
     except Exception as e:
+        print(f"      [PASTML] {protein_id}_{mutation}: NaN - Error reading probability: {e}")
         return np.nan
 
 
@@ -1050,6 +1063,7 @@ def generate_features_for_variants(
                     )
                 else:
                     pastml_score = np.nan
+                    
                 
                 # Get pre-loaded scores
                 af_score = af_scores.get((protein_id, mutation), np.nan)
