@@ -848,22 +848,6 @@ def load_string_scores_batch(protein_ids: List[str]) -> Dict[str, float]:
     """
     string_scores = {pid: np.nan for pid in protein_ids}
     
-<<<<<<< Updated upstream
-    string_path = os.path.join(data_dir, "STIRNG_prot.tsv")
-     # Load entire file once
-    df = pd.read_csv(string_path, sep='\t', names=["ID", "STRING"], header=None)
-    # Create lookup dict from dataframe
-    string_dict = dict(zip(df['ID'], df['STRING']))
-    
-    # Update scores for requested proteins
-    for pid in protein_ids:
-        if pid in string_dict:
-            string_scores[pid] = float(string_dict[pid])
-                
-    
-    return string_scores
-
-=======
     if not os.path.exists(STRING_PATH):
         return string_scores
     
@@ -903,7 +887,6 @@ def load_string_score(protein_id: str) -> float:
     return np.nan
 
 
->>>>>>> Stashed changes
 def _process_variant_worker(args):
     """Worker function for parallel variant processing (module-level for pickling)
     
