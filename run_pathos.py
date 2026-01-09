@@ -55,6 +55,12 @@ MODELS_FOLDER = os.path.join(SCRIPT_DIR, "models")
 GFF_FOLDER = os.path.join(SCRIPT_DIR, "database", "uniprot")
 STRING_PATH = os.path.join(SCRIPT_DIR, "database", "STRING_prot.tsv")
 
+# Checks if all required paths exist
+REQUIRED_PATHS = [DB_PATH, AF_SQLITE_PATH, FASTA_PATH, TREE_PATH, MSA_FOLDER, MAMMALS_DB, MODELS_FOLDER, STRING_PATH]   
+for path in REQUIRED_PATHS:
+    if not os.path.exists(path):
+        print(f"ERROR: Required path not found: {path}")
+        sys.exit(1)
 # Trained model checkpoint files
 TRAINED_MODELS = {
     "ankh2_large": "PATHOS_ankh2.ckpt",
@@ -188,6 +194,7 @@ def generate_msa_with_mmseqs(protein_id: str, fasta_folder: str, msa_folder: str
         return None
     
     fasta_file = os.path.join(fasta_folder, f"{protein_id}.fasta")
+    print(os.path.exists(fasta_file))
     if not os.path.exists(fasta_file):
         debug_print(f"FASTA file not found: {fasta_file}")
         return None
