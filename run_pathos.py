@@ -52,6 +52,8 @@ PASTML_CACHE = os.path.join(SCRIPT_DIR, "database", "pastml_cache")
 FASTA_FOLDER = os.path.join(SCRIPT_DIR, "database", "fastas")
 MAMMALS_DB = os.path.join(SCRIPT_DIR, "database", "mmseqs_db", "mammalsDB")
 MODELS_FOLDER = os.path.join(SCRIPT_DIR, "models")
+GFF_FOLDER = os.path.join(SCRIPT_DIR, "database", "uniprot")
+STRING_PATH = os.path.join(SCRIPT_DIR, "database", "STRING_prot.tsv")
 
 # Trained model checkpoint files
 TRAINED_MODELS = {
@@ -521,7 +523,7 @@ def download_gff_from_uniprot(protein_id: str, output_path: str) -> bool:
         return False
 
 
-def get_matrix_annot(protein_id: str, data_dir: str) -> Optional[np.ndarray]:
+def get_matrix_annot(protein_id: str) -> Optional[np.ndarray]:
     """Create annotation matrix from GFF file for a protein
     
     This implements the exact logic from generate_inputs.py:
@@ -532,7 +534,6 @@ def get_matrix_annot(protein_id: str, data_dir: str) -> Optional[np.ndarray]:
     
     Args:
         protein_id: UniProt accession ID
-        data_dir: Base data directory
     
     Returns:
         Annotation matrix of shape (seq_length, 18) or None if GFF not found
@@ -559,25 +560,13 @@ def get_matrix_annot(protein_id: str, data_dir: str) -> Optional[np.ndarray]:
         'Modified residue': 17
     }
     
-    # Try to find GFF file in multiple locations (same path as generate_inputs.py)
-    gff_paths = [
-        os.path.join(data_dir, "uniprot", f"{protein_id}.gff"),
-        os.path.join(data_dir, "gff", f"{protein_id}.gff"),
-        os.path.join(data_dir, f"{protein_id}.gff")
-    ]
-    
-    gff_file = None
-    for path in gff_paths:
-        if os.path.exists(path):
-            gff_file = path
-            break
+    # GFF file path
+    gff_file = os.path.join(GFF_FOLDER, f"{protein_id}.gff")
     
     # If not found, try to download it
-    if not gff_file:
-        download_path = os.path.join(data_dir, "uniprot", f"{protein_id}.gff")
-        if download_gff_from_uniprot(protein_id, download_path):
-            gff_file = download_path
-        else:
+    if not os.path.exists(gff_file):
+        os.makedirs(GFF_FOLDER, exist_ok=True)
+        if not download_gff_from_uniprot(protein_id, gff_file):
             return None
     
     # Parse GFF file
@@ -684,8 +673,7 @@ def window_annot(mutation: str, matrix: np.ndarray, window_size: int = 5) -> Lis
     return (window_sum != 0).astype(int).tolist()
 
 
-def load_uniprot_annotations(protein_id: str, mutation: str, sequences: Dict[str, str], 
-                            data_dir: str, window_size: int = 5) -> List[int]:
+def load_uniprot_annotations(protein_id: str, mutation: str, window_size: int = 5) -> List[int]:
     """Load UniProt annotation features for a specific variant
     
     This is the main function that combines get_matrix_annot and window_annot
@@ -694,15 +682,13 @@ def load_uniprot_annotations(protein_id: str, mutation: str, sequences: Dict[str
     Args:
         protein_id: UniProt accession ID
         mutation: Mutation string (e.g., 'R50K')
-        sequences: Dictionary of protein sequences
-        data_dir: Base data directory
         window_size: Window size for annotation extraction (default 5)
     
     Returns:
         List of 18 binary values representing annotations in the window
     """
     # Get the full annotation matrix for this protein
-    matrix = get_matrix_annot(protein_id, data_dir)
+    matrix = get_matrix_annot(protein_id)
     
     if matrix is None:
         return [0] * 18
@@ -739,33 +725,22 @@ def get_gene_name_from_uniprot(uniprot_id: str) -> Optional[str]:
     return None
 
 
-def load_gene_names(protein_ids: List[str], data_dir: str) -> Dict[str, str]:
-    """Load gene names for proteins from UniProt mapping file
+def load_gene_names(protein_ids: List[str]) -> Dict[str, str]:
+    """Load gene names for proteins from UniProt API
     
     Args:
         protein_ids: List of UniProt IDs
-        data_dir: Base data directory
     
     Returns:
         Dictionary mapping UniProt ID to gene name
     """
-    # Try multiple possible locations
-    mapping_paths = [
-        os.path.join(data_dir, "idmapping_uniprot_gene.tsv"),
-        "/lustre/fswork/projects/rech/avo/uky46my/PATHOS/idmapping_uniprot_gene.tsv",
-        "/dsimb/wasabi/radjasan/these/idmapping_uniprot_gene.tsv"
-    ]
-    
     gene_dict = {}
     
-    for mapping_file in mapping_paths:
-        if os.path.exists(mapping_file):
-            try:
-                df = pd.read_csv(mapping_file, sep='\t', names=["UniProtID", "Entry", "Gene"], header=None)
-                gene_dict = dict(zip(df["UniProtID"], df["Gene"]))
-                break
-            except Exception as e:
-                continue
+    for pid in tqdm(protein_ids, desc="Fetching gene names", dynamic_ncols=True):
+        gene_name = get_gene_name_from_uniprot(pid)
+        if gene_name:
+            gene_dict[pid] = gene_name
+        time.sleep(0.1)  # Rate limiting
     
     return gene_dict
 
@@ -862,18 +837,18 @@ def load_allele_frequencies_batch(variants: List[Tuple[str, str]], gene_names: D
     return af_scores
 
 
-def load_string_scores_batch(protein_ids: List[str], data_dir: str) -> Dict[str, float]:
+def load_string_scores_batch(protein_ids: List[str]) -> Dict[str, float]:
     """Load STRING interaction scores for all proteins at once
     
     Args:
         protein_ids: List of UniProt IDs
-        data_dir: Base data directory
     
     Returns:
         Dictionary mapping protein ID to STRING score
     """
     string_scores = {pid: np.nan for pid in protein_ids}
     
+<<<<<<< Updated upstream
     string_path = os.path.join(data_dir, "STIRNG_prot.tsv")
      # Load entire file once
     df = pd.read_csv(string_path, sep='\t', names=["ID", "STRING"], header=None)
@@ -888,6 +863,47 @@ def load_string_scores_batch(protein_ids: List[str], data_dir: str) -> Dict[str,
     
     return string_scores
 
+=======
+    if not os.path.exists(STRING_PATH):
+        return string_scores
+    
+    try:
+        df = pd.read_csv(STRING_PATH, sep='\t', names=["ID", "STRING"], header=None)
+        string_dict = dict(zip(df['ID'], df['STRING']))
+        
+        for pid in protein_ids:
+            if pid in string_dict:
+                string_scores[pid] = float(string_dict[pid])
+    except Exception as e:
+        pass
+    
+    return string_scores
+
+
+def load_string_score(protein_id: str) -> float:
+    """Load STRING interaction score for a protein
+    
+    Args:
+        protein_id: UniProt ID
+    
+    Returns:
+        STRING interaction score or default value if not found
+    """
+    if not os.path.exists(STRING_PATH):
+        return np.nan
+    
+    try:
+        df = pd.read_csv(STRING_PATH, sep='\t', names=["ID", "STRING"], header=None)
+        match = df[df['ID'] == protein_id]
+        if not match.empty:
+            return float(match.iloc[0]['STRING'])
+    except Exception as e:
+        pass
+    
+    return np.nan
+
+
+>>>>>>> Stashed changes
 def _process_variant_worker(args):
     """Worker function for parallel variant processing (module-level for pickling)
     
@@ -905,7 +921,7 @@ def _process_variant_worker(args):
         wt_aa, position, mut_aa = parse_mutation(mutation)
         
         # Get annotation features
-        annot_features = load_uniprot_annotations(protein_id, mutation, {protein_id: seq}, data_dir, window_size=5)
+        annot_features = load_uniprot_annotations(protein_id, mutation, window_size=5)
         
         # Compute PASTML score
         if do_pastml and tree_path:
@@ -961,18 +977,9 @@ def generate_features_for_variants(
         fasta_folder: Path to individual FASTA files (for MSA generation)
         mammals_db: Path to mammalsDB for mmseqs2 (for MSA generation)
     """
-    # Load gene names for all proteins
+    # Load gene names for all proteins from UniProt API
     unique_proteins = list(set([pid for pid, _ in variants]))
-    gene_names = load_gene_names(unique_proteins, data_dir)
-    
-    # Pre-fetch missing gene names from UniProt API (sequential, with rate limiting)
-    missing_genes = [pid for pid in unique_proteins if pid not in gene_names]
-    if missing_genes:
-        for pid in tqdm(missing_genes[:50], desc="Fetching gene names", dynamic_ncols=True):  # Limit API calls
-            gene_name = get_gene_name_from_uniprot(pid)
-            if gene_name:
-                gene_names[pid] = gene_name
-            time.sleep(0.2)
+    gene_names = load_gene_names(unique_proteins)
     
     # Load phylogenetic tree if computing PASTML
     tree = None
@@ -989,7 +996,7 @@ def generate_features_for_variants(
             compute_pastml = False
     
     # Pre-load STRING scores for all proteins in batch (single file read)
-    string_scores = load_string_scores_batch(unique_proteins, data_dir)
+    string_scores = load_string_scores_batch(unique_proteins)
     
     # Pre-load all AF scores in batch (single database connection)
     af_sqlite = af_sqlite or AF_SQLITE_PATH
@@ -1042,7 +1049,7 @@ def generate_features_for_variants(
                 wt_aa, position, mut_aa = parse_mutation(mutation)
                 
                 # Get annotation features
-                annot_features = load_uniprot_annotations(protein_id, mutation, sequences, data_dir, window_size=5)
+                annot_features = load_uniprot_annotations(protein_id, mutation, window_size=5)
                 
                 # Compute PASTML score
                 if compute_pastml:
@@ -1617,15 +1624,15 @@ def process_variants_batched(
     """Process variants in batches to avoid memory overload
     
     Optimizations:
-    - ESMC runs on CPU while Ankh2 runs on GPU in parallel
+    - ESMC and Ankh2 run sequentially on GPU (ESMC first, then Ankh2)
     - WT embeddings cached per (protein, truncation_window) to avoid recomputation
-    - PLM models loaded once (ESMC on CPU, Ankh2 on GPU)
+    - PLM models loaded one at a time to save GPU memory
     
     Args:
         variants_to_process: List of (protein_id, mutation) tuples
         sequences: Dictionary mapping protein IDs to sequences
         features_df: DataFrame with precomputed features
-        device: torch device (used for Ankh2 and PATHOS inference)
+        device: torch device for GPU inference
         model_path: Path to PATHOS models
         batch_size: Number of variants per batch (default: 100)
     
@@ -1633,8 +1640,6 @@ def process_variants_batched(
         Dictionary mapping (protein_id, mutation) to prediction score
     """
     import gc
-    import threading
-    from concurrent.futures import ThreadPoolExecutor, as_completed
     import time
     
     all_predictions = {}
@@ -1643,45 +1648,26 @@ def process_variants_batched(
     # Create features lookup once using set_index for O(1) lookup
     features_lookup = features_df.set_index(['ID', 'Variation']).to_dict('index')
     
-    # Define devices: ESMC on CPU, Ankh2 on GPU
-    cpu_device = torch.device('cpu')
-    gpu_device = device if torch.cuda.is_available() else cpu_device
+    # Use GPU for everything
+    gpu_device = device if torch.cuda.is_available() else torch.device('cpu')
     
     # Load PATHOS models (they're small, run inference on GPU)
     pathos_models = {}
     for plm_name in PLM_MODELS:
         pathos_models[plm_name] = load_pathos_model(f"pathos_{plm_name}", plm_name, gpu_device, model_path)
     
-    # Load PLM models: ESMC on CPU, Ankh2 on GPU
-    print(f"    Loading esmc_600m on CPU...")
-    esmc_model, esmc_tokenizer = load_plm_model("esmc_600m", cpu_device)
-    
-    print(f"    Loading ankh2_large on GPU...")
-    ankh_model, ankh_tokenizer = load_plm_model("ankh2_large", gpu_device)
-    
-    plm_models = {
-        "esmc_600m": (esmc_model, esmc_tokenizer, cpu_device),
-        "ankh2_large": (ankh_model, ankh_tokenizer, gpu_device)
-    }
-    
-    # WT cache per PLM with thread lock for safety
+    # WT cache per PLM
     wt_cache = {}
-    wt_cache_lock = threading.Lock()
-    
-    # Progress tracking per PLM
-    progress_counters = {"esmc_600m": 0, "ankh2_large": 0}
-    progress_lock = threading.Lock()
     
     print(f"    Processing {len(variants_to_process)} variants in {n_batches} batches of {batch_size}")
-    print(f"    Mode: ESMC (CPU) + Ankh2 (GPU) in parallel\n")
+    print(f"    Mode: ESMC then Ankh2 (both on GPU, sequential)\n")
     
-    def generate_embeddings_for_plm(plm_name, batch_variants, model, tokenizer, plm_device):
-        """Generate embeddings for a specific PLM on its designated device"""
+    def generate_embeddings_for_plm(plm_name, batch_variants, model, tokenizer):
+        """Generate embeddings for a specific PLM on GPU"""
         embeddings = {}
-        device_str = "CPU" if plm_device.type == 'cpu' else "GPU"
         
         start_time = time.time()
-        print(f"      [{plm_name}] Started on {device_str} ({len(batch_variants)} variants)")
+        print(f"      [{plm_name}] Started on GPU ({len(batch_variants)} variants)")
         
         with torch.no_grad():
             for i, (protein_id, mutation) in enumerate(batch_variants):
@@ -1698,12 +1684,11 @@ def process_variants_batched(
                     # Cache key for WT embedding (per PLM)
                     cache_key = (plm_name, protein_id, start_pos, len(wt_seq_trunc))
                     
-                    # Get or compute WT embedding (thread-safe)
-                    with wt_cache_lock:
-                        if cache_key not in wt_cache:
-                            wt_emb_full = embed_sequence(wt_seq_trunc, model, tokenizer, plm_name, plm_device)
-                            wt_cache[cache_key] = wt_emb_full.cpu()
-                        wt_emb_full = wt_cache[cache_key]
+                    # Get or compute WT embedding
+                    if cache_key not in wt_cache:
+                        wt_emb_full = embed_sequence(wt_seq_trunc, model, tokenizer, plm_name, gpu_device)
+                        wt_cache[cache_key] = wt_emb_full.cpu()
+                    wt_emb_full = wt_cache[cache_key]
                     
                     wt_emb_at_pos = wt_emb_full[adjusted_pos - 1]
                     
@@ -1715,7 +1700,7 @@ def process_variants_batched(
                     else:
                         mut_seq_trunc = mut_seq_full
                     
-                    mut_emb = embed_sequence(mut_seq_trunc, model, tokenizer, plm_name, plm_device)
+                    mut_emb = embed_sequence(mut_seq_trunc, model, tokenizer, plm_name, gpu_device)
                     mut_emb_at_pos = mut_emb[adjusted_pos - 1].cpu()
                     
                     embeddings[f"{protein_id}_{mutation}_wt"] = wt_emb_at_pos
@@ -1723,48 +1708,63 @@ def process_variants_batched(
                     
                     del mut_emb
                     
-                    # Update progress counter
-                    with progress_lock:
-                        progress_counters[plm_name] = i + 1
-                    
                 except Exception as e:
                     continue
         
         elapsed = time.time() - start_time
-        print(f"      [{plm_name}] Finished on {device_str} in {elapsed:.1f}s ({len(embeddings)//2} variants)")
+        print(f"      [{plm_name}] Finished on GPU in {elapsed:.1f}s ({len(embeddings)//2} variants)")
         
-        return plm_name, embeddings
+        return embeddings
+    
+    # Load and process with ESMC first
+    print(f"    Loading esmc_600m on GPU...")
+    esmc_model, esmc_tokenizer = load_plm_model("esmc_600m", gpu_device)
+    print(f"    Running ESMC...")
     
     for batch_idx in range(n_batches):
         start_idx = batch_idx * batch_size
         end_idx = min(start_idx + batch_size, len(variants_to_process))
         batch_variants = variants_to_process[start_idx:end_idx]
         
-        print(f"    Batch {batch_idx + 1}/{n_batches} ({len(batch_variants)} variants)")
+        print(f"    Batch {batch_idx + 1}/{n_batches} ({len(batch_variants)} variants) - ESMC")
         
-        # Reset progress counters
-        progress_counters["esmc_600m"] = 0
-        progress_counters["ankh2_large"] = 0
+        batch_embeddings = {"esmc_600m": generate_embeddings_for_plm("esmc_600m", batch_variants, esmc_model, esmc_tokenizer)}
         
-        # Run ESMC (CPU) and Ankh2 (GPU) in parallel
-        batch_embeddings = {}
+        # Store ESMC embeddings temporarily
+        if not hasattr(generate_embeddings_for_plm, 'esmc_embeddings'):
+            generate_embeddings_for_plm.esmc_embeddings = {}
+        generate_embeddings_for_plm.esmc_embeddings.update(batch_embeddings["esmc_600m"])
+    
+    # Unload ESMC, clear GPU memory
+    del esmc_model, esmc_tokenizer
+    torch.cuda.empty_cache() if torch.cuda.is_available() else None
+    gc.collect()
+    
+    # Clear ESMC entries from WT cache
+    wt_cache = {k: v for k, v in wt_cache.items() if k[0] != "esmc_600m"}
+    
+    # Load and process with Ankh2
+    print(f"\n    Loading ankh2_large on GPU...")
+    ankh_model, ankh_tokenizer = load_plm_model("ankh2_large", gpu_device)
+    print(f"    Running Ankh2...")
+    
+    for batch_idx in range(n_batches):
+        start_idx = batch_idx * batch_size
+        end_idx = min(start_idx + batch_size, len(variants_to_process))
+        batch_variants = variants_to_process[start_idx:end_idx]
         
-        with ThreadPoolExecutor(max_workers=2) as executor:
-            futures = []
-            for plm_name in PLM_MODELS:
-                model, tokenizer, plm_device = plm_models[plm_name]
-                future = executor.submit(
-                    generate_embeddings_for_plm,
-                    plm_name, batch_variants, model, tokenizer, plm_device
-                )
-                futures.append(future)
-            
-            # Wait for both to complete
-            for future in as_completed(futures):
-                plm_name, embeddings = future.result()
-                batch_embeddings[plm_name] = embeddings
+        print(f"    Batch {batch_idx + 1}/{n_batches} ({len(batch_variants)} variants) - Ankh2")
         
-        print(f"      Both PLMs completed, running PATHOS inference...")
+        ankh_embeddings = generate_embeddings_for_plm("ankh2_large", batch_variants, ankh_model, ankh_tokenizer)
+        
+        # Combine with stored ESMC embeddings for this batch
+        batch_embeddings = {
+            "esmc_600m": {k: v for k, v in generate_embeddings_for_plm.esmc_embeddings.items() 
+                         if any(f"{p}_{m}" in k for p, m in batch_variants)},
+            "ankh2_large": ankh_embeddings
+        }
+        
+        print(f"      Running PATHOS inference...")
         
         # Run PATHOS inference for this batch (on GPU, average both PLMs)
         for protein_id, mutation in batch_variants:
@@ -1801,12 +1801,15 @@ def process_variants_batched(
             if scores:
                 all_predictions[(protein_id, mutation)] = np.mean(scores)
         
-        # Clear batch embeddings
-        del batch_embeddings
+        # Clear batch embeddings for this Ankh2 batch
+        del batch_embeddings, ankh_embeddings
         gc.collect()
     
     # Cleanup: unload PLM models and clear cache
-    del plm_models, wt_cache, esmc_model, ankh_model
+    del ankh_model, ankh_tokenizer, wt_cache
+    if hasattr(generate_embeddings_for_plm, 'esmc_embeddings'):
+        del generate_embeddings_for_plm.esmc_embeddings
+    del pathos_models
     torch.cuda.empty_cache() if torch.cuda.is_available() else None
     gc.collect()
     
