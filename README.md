@@ -103,6 +103,9 @@ Full list of available options for `run_pathos.py`.
 | `--mmseqs-mem-limit` | Memory limit for mmseqs2 MSA generation (default: 8G) |
 | `--batch-threshold` | Number of variants above which batched mode is enabled (default: 10000) |
 
+## Embeddings download
+Soon available
+
 ## Citation
 
 If you use PATHOS in your research, please cite:
