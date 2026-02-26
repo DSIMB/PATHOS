@@ -75,8 +75,8 @@ fi
 if [ -f mmseqs_db.zip ]; then
     unzip -o mmseqs_db.zip && rm mmseqs_db.zip
 fi
-if [ -f uniprot.zip ]; then
-    unzip -o uniprot.zip && rm uniprot.zip
+if [ -f database/fastas.zip ]; then
+    unzip -o database/fastas.zip && rm database/fastas.zip
 fi
 
 cd ..
@@ -84,4 +84,4 @@ cd ..
 echo ""
 echo "=== Setup complete ==="
 echo "Activate the environment with: conda activate PATHOS_env"
-echo "Test with: python run_pathos.py -i example_input.txt -o test_output.csv"
+echo "Test with: python run_pathos.py --protein P51787 --mutation M1A"
