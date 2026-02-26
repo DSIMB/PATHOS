@@ -1432,6 +1432,12 @@ def generate_embeddings_for_variants(
     """Generate embeddings for wild-type and mutant sequences"""
     model, tokenizer = load_plm_model(model_name, device)
     
+    # Print running message
+    if model_name == "esmc_600m":
+        print(f"        Running ESMC 600M...")
+    elif model_name == "ankh2_large":
+        print(f"        Running Ankh2 Large...")
+    
     all_embeddings = {}
     
     with torch.no_grad():
@@ -1858,26 +1864,56 @@ def main():
         description="Run PATHOS predictions for protein variants",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
-Examples:
-  python run_pathos.py --input variants.txt --output results.csv
-  python run_pathos.py -i variants.txt -o results.csv
-        """
+        Examples:
+        # Single protein and mutation
+        python run_pathos.py --protein P16501 --mutation M1A
+        
+        # File input with output
+        python run_pathos.py --file variants.txt --output results.csv
+        
+        # Single protein with score filtering
+        python run_pathos.py --protein P16501 --min-score 0.9 --output pathogenic.csv
+        
+        # Full scan of a protein (all possible mutations)
+        python run_pathos.py --protein P16501 --output all_mutations.csv
+                """
     )
     
+    # Input options (at least one required)
     parser.add_argument(
-        "-i", "--input",
-        required=True,
+        "-p", "--protein",
+        help="UniProt protein ID (e.g., P16501)"
+    )
+    parser.add_argument(
+        "-m", "--mutation",
+        help="Mutation in format like M1A (requires --protein)"
+    )
+    parser.add_argument(
+        "-f", "--file",
         help="Input file with protein IDs and mutations"
     )
+    
+    # Output options
     parser.add_argument(
         "-o", "--output",
-        required=True,
-        help="Output CSV file for results"
+        help="Output CSV file for results (default: stdout for single mutation, results.csv for file/scan)"
     )
+    parser.add_argument(
+        "--min-score",
+        type=float,
+        help="Minimum PATHOS score threshold for filtering results (0.0-1.0)"
+    )
+    parser.add_argument(
+        "--max-score",
+        type=float,
+        help="Maximum PATHOS score threshold for filtering results (0.0-1.0)"
+    )
+    
+    # Processing options
     parser.add_argument(
         "--n-jobs",
         type=int,
-        default=None,
+        default=5,
         help="Number of parallel workers for feature generation (default: 5)"
     )
     parser.add_argument(
@@ -1897,13 +1933,49 @@ Examples:
         default=10000,
         help="Number of variants above which batched mode is enabled to save memory (default: 10000, use 0 to always batch)"
     )
+    parser.add_argument(
+        "--scan",
+        action="store_true",
+        help="Enable de novo full protein scan (required when protein is not in database). Warning: this can take a very long time."
+    )
     
     args = parser.parse_args()
     
-    # Validate required files exist
-    if not os.path.exists(args.input):
-        print(f"ERROR: Input file not found: {args.input}")
-        sys.exit(1)
+    # Validate input arguments: need either --protein or --file
+    if not args.protein and not args.file:
+        parser.error("At least one of --protein or --file is required")
+    
+    if args.mutation and not args.protein:
+        parser.error("--mutation requires --protein")
+    
+    if args.min_score is not None and (args.min_score < 0.0 or args.min_score > 1.0):
+        parser.error("--min-score must be between 0.0 and 1.0")
+    
+    if args.max_score is not None and (args.max_score < 0.0 or args.max_score > 1.0):
+        parser.error("--max-score must be between 0.0 and 1.0")
+    
+    if args.min_score is not None and args.max_score is not None and args.min_score > args.max_score:
+        parser.error("--min-score cannot be greater than --max-score")
+    
+    # Determine input mode and set default output
+    if args.file:
+        # File input mode
+        if not os.path.exists(args.file):
+            print(f"ERROR: Input file not found: {args.file}")
+            sys.exit(1)
+        if not args.output:
+            args.output = "results.csv"
+        input_mode = "file"
+    elif args.protein and args.mutation:
+        # Single mutation mode
+        input_mode = "single"
+        if not args.output:
+            args.output = None  # Will print to stdout
+    else:
+        # Full protein scan mode (--protein without --mutation)
+        input_mode = "scan"
+        if not args.output:
+            args.output = f"{args.protein}_results.csv"
     
     if not os.path.exists(DB_PATH):
         print(f"ERROR: Database not found: {DB_PATH}")
@@ -1928,32 +2000,107 @@ Examples:
     total_steps = 8
     start_time = time.time()
     
-    # Step 1: Parse input file
-    print(f"\n[1/{total_steps}] Parsing input file...")
-    variants, full_scan_proteins = parse_input_file(args.input)
+    # Step 1: Parse input based on mode
+    print(f"\n[1/{total_steps}] Parsing input...")
+    
+    if input_mode == "file":
+        # File input mode
+        variants, full_scan_proteins = parse_input_file(args.file)
+    elif input_mode == "single":
+        # Single mutation mode
+        variants = [(args.protein, args.mutation)]
+        full_scan_proteins = []
+        print(f"    Single variant: {args.protein} {args.mutation}")
+    else:
+        # Full scan mode (protein without mutation)
+        variants = []
+        full_scan_proteins = [args.protein]
+        print(f"    Full scan mode for protein: {args.protein}")
     
     # Handle full-scan proteins (no mutation specified -> generate all mutations)
     if full_scan_proteins:
-        print(f"    Found {len(full_scan_proteins)} proteins for full scan (all mutations)")
-        print(f"    Loading sequences to generate all possible mutations...")
-        scan_sequences = load_fasta_sequences(FASTA_PATH, protein_ids=full_scan_proteins)
+        is_single_protein = len(full_scan_proteins) == 1
+        if not is_single_protein:
+            print(f"    Found {len(full_scan_proteins)} proteins for full scan (all mutations)")
         
-        full_scan_variants = []
+        # First, check which proteins are already in the database
+        if not is_single_protein:
+            print(f"    Checking database for existing predictions...")
+        proteins_in_db = set()
+        proteins_not_in_db = set()
+        
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
         for protein_id in full_scan_proteins:
-            if protein_id in scan_sequences:
-                seq = scan_sequences[protein_id]
-                protein_mutations = generate_all_mutations(protein_id, seq)
-                full_scan_variants.extend(protein_mutations)
-                print(f"    {protein_id}: {len(seq)} residues -> {len(protein_mutations)} mutations")
+            cursor.execute("SELECT COUNT(*) FROM mutations WHERE protein_id = ?", (protein_id,))
+            count = cursor.fetchone()[0]
+            if count > 0:
+                proteins_in_db.add(protein_id)
+                if is_single_protein:
+                    print(f"    Found {count} pre-computed predictions in database")
+                else:
+                    print(f"    {protein_id}: found {count} pre-computed predictions in database")
             else:
-                print(f"    WARNING: {protein_id} not found in FASTA, skipping")
+                proteins_not_in_db.add(protein_id)
+                if is_single_protein:
+                    print(f"    Not found in database (de novo required)")
+                else:
+                    print(f"    {protein_id}: not found in database (de novo required)")
+        conn.close()
         
-        print(f"    Total full-scan mutations: {len(full_scan_variants)}")
-        # Append full-scan variants to the main list (will be processed after regular variants)
-        variants.extend(full_scan_variants)
+        # If there are proteins not in DB and --scan is not enabled, skip them
+        if proteins_not_in_db and not args.scan:
+            # Remove proteins not in DB from the scan list
+            full_scan_proteins = [p for p in full_scan_proteins if p in proteins_in_db]
+            
+            # If no proteins left and no other variants, exit with warning
+            if not full_scan_proteins and not variants:
+                print(f"\n{'='*60}")
+                print(f"WARNING: The following proteins are not in the database:")
+                for p in proteins_not_in_db:
+                    print(f"  - {p}")
+                print(f"\nA full de novo scan can take a very long time (hours).")
+                print(f"If you still want to run it, re-run with the --scan argument:")
+                print(f"\n  python run_pathos.py --protein {list(proteins_not_in_db)[0]} --scan --output results.csv")
+                print(f"{'='*60}")
+                sys.exit(0)
+            elif proteins_not_in_db:
+                # Some proteins skipped but others remain
+                print(f"\n    Skipping proteins not in database (use --scan for de novo): {', '.join(proteins_not_in_db)}")
+        
+        if full_scan_proteins:
+            if not is_single_protein:
+                print(f"    Loading sequences to generate all possible mutations...")
+            scan_sequences = load_fasta_sequences(FASTA_PATH, protein_ids=full_scan_proteins)
+            
+            full_scan_variants = []
+            for protein_id in full_scan_proteins:
+                if protein_id in scan_sequences:
+                    seq = scan_sequences[protein_id]
+                    protein_mutations = generate_all_mutations(protein_id, seq)
+                    full_scan_variants.extend(protein_mutations)
+                    if not is_single_protein:
+                        print(f"    {protein_id}: {len(seq)} residues -> {len(protein_mutations)} mutations")
+                else:
+                    print(f"    WARNING: {protein_id} not found in FASTA, skipping")
+            
+            if not is_single_protein:
+                print(f"    Total full-scan mutations: {len(full_scan_variants)}")
+            # Append full-scan variants to the main list (will be processed after regular variants)
+            variants.extend(full_scan_variants)
+    
+    # Check if we have anything to process
+    if not variants:
+        print(f"\n{'='*60}")
+        print(f"No variants to process.")
+        print(f"{'='*60}")
+        sys.exit(0)
     
     unique_proteins = list(set([protein_id for protein_id, _ in variants]))
-    print(f"    Total: {len(variants)} variants across {len(unique_proteins)} proteins")
+    if len(unique_proteins) == 1:
+        print(f"    Total: {len(variants)} variants")
+    else:
+        print(f"    Total: {len(variants)} variants across {len(unique_proteins)} proteins")
     
     # Step 2: Query database for existing predictions (no sequences needed)
     print(f"\n[2/{total_steps}] Querying PATHOS database for existing predictions...")
@@ -2006,14 +2153,10 @@ Examples:
                 print(f"    Successfully generated: {len(generated_msas)}")
             if failed_msas:
                 print(f"    Failed to generate: {len(failed_msas)} (PASTML will return NaN for these)")
-                
-                feature_step = 6
-            else:
-                feature_step = 5
             
             # Generate features
             n_workers = args.n_jobs if args.n_jobs else max(1, multiprocessing.cpu_count() - 1)
-            print(f"\n[{feature_step}/{total_steps}] Generating features for {len(variants_to_process)} variants ({n_workers} workers)...")
+            print(f"\n[6/{total_steps}] Generating features for {len(variants_to_process)} variants ({n_workers} workers)...")
             print(f"    - PASTML: computing conservation scores")
             print(f"    - AF: querying allele frequencies from gnomAD")
             print(f"    - STRING: loading protein interaction scores")
@@ -2034,11 +2177,8 @@ Examples:
             
             # Step 7-8: Generate embeddings and run inference
             # Use batched mode for large datasets to save memory
-            emb_step = feature_step + 1
-            inf_step = feature_step + 2
-            
             if len(variants_to_process) > args.batch_threshold:
-                print(f"\n[{emb_step}-{inf_step}/{total_steps}] Generating embeddings and running inference (batched mode for {len(variants_to_process)} variants)...")
+                print(f"\n[7-8/{total_steps}] Generating embeddings and running inference (batched mode for {len(variants_to_process)} variants)...")
                 new_predictions = process_variants_batched(
                     variants_to_process,
                     sequences,
@@ -2049,7 +2189,7 @@ Examples:
                 )
             else:
                 # Standard mode: generate all embeddings sequentially, then run inference
-                print(f"\n[{emb_step}/{total_steps}] Generating WT and mutant embeddings with PLMs...")
+                print(f"\n[7/{total_steps}] Generating WT and mutant embeddings with PLMs...")
                 print(f"    ESMC 600M:")
                 embeddings_esmc = generate_embeddings_for_variants(
                     variants_to_process, sequences, "esmc_600m", DEVICE
@@ -2059,7 +2199,7 @@ Examples:
                     variants_to_process, sequences, "ankh2_large", DEVICE
                 )
                 
-                print(f"\n[{inf_step}/{total_steps}] Running PATHOS inference...")
+                print(f"\n[8/{total_steps}] Running PATHOS inference...")
                 new_predictions = run_pathos_inference(
                     variants_to_process,
                     embeddings_esmc,
@@ -2074,22 +2214,80 @@ Examples:
     # Update valid_variants to include only those we have results for
     valid_variants = variants_in_db + list(new_predictions.keys())
     
-    # Save results
-    save_results(variants, db_results, new_predictions, args.output)
+    # Combine all results for filtering
+    all_results = {}
+    for protein_id, mutation in variants:
+        if (protein_id, mutation) in new_predictions:
+            all_results[(protein_id, mutation)] = new_predictions[(protein_id, mutation)]
+        elif db_results.get((protein_id, mutation)) is not None:
+            all_results[(protein_id, mutation)] = db_results[(protein_id, mutation)]
     
-    # Final summary
-    total_time = time.time() - start_time
-    pathogenic = sum(1 for k, v in new_predictions.items() if v >= 0.63)
-    benign = len(new_predictions) - pathogenic
-    print(f"\n{'='*60}")
-    print(f"Results saved to: {args.output}")
-    print(f"  From database: {len(variants_in_db)}")
-    print(f"  Newly predicted: {len(new_predictions)} ({pathogenic} pathogenic, {benign} benign)")
-    print(f"  Total time: {total_time:.1f}s")
-    print(f"{'='*60}")
+    # Apply score filtering if specified
+    if args.min_score is not None or args.max_score is not None:
+        filtered_count = len(all_results)
+        if args.min_score is not None:
+            all_results = {k: v for k, v in all_results.items() if v >= args.min_score}
+        if args.max_score is not None:
+            all_results = {k: v for k, v in all_results.items() if v <= args.max_score}
+        filter_desc = []
+        if args.min_score is not None:
+            filter_desc.append(f">= {args.min_score}")
+        if args.max_score is not None:
+            filter_desc.append(f"<= {args.max_score}")
+        print(f"\n    Filtered by score {' and '.join(filter_desc)}: {len(all_results)}/{filtered_count} variants")
     
-    # Print final CSV
-    print(f"\n{pd.read_csv(args.output).head(50).to_string(index=False)}")
+    # Handle output
+    if input_mode == "single" and args.output is None:
+        # Single mutation mode with stdout output
+        total_time = time.time() - start_time
+        protein_id, mutation = args.protein, args.mutation
+        if (protein_id, mutation) in all_results:
+            score = all_results[(protein_id, mutation)]
+            classification = "Pathogenic" if score >= 0.63 else "Benign"
+            print(f"\n{'='*60}")
+            print(f"Protein: {protein_id}")
+            print(f"Mutation: {mutation}")
+            print(f"PATHOS Score: {score:.4f}")
+            print(f"Classification: {classification}")
+            print(f"Total time: {total_time:.1f}s")
+            print(f"{'='*60}")
+        else:
+            print(f"\n{'='*60}")
+            print(f"ERROR: Could not predict score for {protein_id} {mutation}")
+            print(f"{'='*60}")
+    else:
+        # Save results to file
+        # Rebuild db_results and new_predictions based on filtered results
+        filtered_db_results = {k: v for k, v in db_results.items() if k in all_results}
+        filtered_new_predictions = {k: v for k, v in new_predictions.items() if k in all_results}
+        filtered_variants = [v for v in variants if v in all_results]
+        
+        save_results(filtered_variants, filtered_db_results, filtered_new_predictions, args.output)
+        
+        # Final summary
+        total_time = time.time() - start_time
+        pathogenic = sum(1 for k, v in all_results.items() if v >= 0.63)
+        benign = len(all_results) - pathogenic
+        print(f"\n{'='*60}")
+        print(f"Results saved to: {args.output}")
+        print(f"  From database: {len([k for k in all_results if k in variants_in_db])}")
+        print(f"  Newly predicted: {len([k for k in all_results if k in new_predictions])}")
+        print(f"  Total: {len(all_results)} ({pathogenic} pathogenic, {benign} benign)")
+        if args.min_score is not None or args.max_score is not None:
+            filter_parts = []
+            if args.min_score is not None:
+                filter_parts.append(f">= {args.min_score}")
+            if args.max_score is not None:
+                filter_parts.append(f"<= {args.max_score}")
+            print(f"  Score filter: {' and '.join(filter_parts)}")
+        print(f"  Total time: {total_time:.1f}s")
+        print(f"{'='*60}")
+        
+        # Print final CSV (only if there are results)
+        if all_results:
+            print(f"\n{pd.read_csv(args.output).head(50).to_string(index=False)}")
+        else:
+            print("\nNo results to display.")
 
 
 if __name__ == "__main__":
