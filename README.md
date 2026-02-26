@@ -29,13 +29,23 @@ python run_pathos.py --protein P51787 --mutation M1A
 ### Batch query from file
 
 ```bash
-python run_pathos.py --file variants.txt --output results.csv
+python run_pathos.py --file example_input.txt --output results.csv
 ```
 
-### Filter results
+### Filter results by score
 
 ```bash
 python run_pathos.py --protein P51787 --min-score 0.9 --output pathogenic.csv
+```
+
+### Full protein scan
+
+```bash
+# For proteins in database (instant)
+python run_pathos.py --protein P51787 --output P51787_all.csv
+
+# For proteins NOT in database (requires --scan, can take hours)
+python run_pathos.py --protein Q12345 --scan --output Q12345_all.csv
 ```
 
 ### Input file format
@@ -96,12 +106,45 @@ Full list of available options for `run_pathos.py`.
 
 | Option | Description |
 |--------|-------------|
-| `-i, --input` | Input file (TXT, TSV, or CSV) |
-| `-o, --output` | Output CSV file |
-| `--n-jobs` | Number of parallel workers for feature generation (default: 5). Increase for faster processing on multi-core systems. |
+| `-p, --protein` | UniProt protein ID (e.g., P51787) |
+| `-m, --mutation` | Mutation in format like M1A (requires --protein) |
+| `-f, --file` | Input file with protein IDs and mutations (TXT, TSV, or CSV) |
+| `-o, --output` | Output CSV file (default: stdout for single mutation) |
+| `--min-score` | Minimum PATHOS score threshold for filtering results (0.0-1.0) |
+| `--scan` | Enable de novo full protein scan (required for proteins not in database) |
+| `--n-jobs` | Number of parallel workers for feature generation (default: 5) |
 | `--batch-size` | Batch size for embedding generation (default: 100) |
 | `--mmseqs-mem-limit` | Memory limit for mmseqs2 MSA generation (default: 8G) |
 | `--batch-threshold` | Number of variants above which batched mode is enabled (default: 10000) |
+
+## Full protein scan
+
+PATHOS can predict scores for all possible mutations of a protein (19 substitutions × sequence length).
+
+### Proteins in the database
+
+For proteins already in the pre-computed database, simply omit the `--mutation` argument:
+
+```bash
+python run_pathos.py --protein P51787 --output P51787_all.csv
+```
+
+This instantly retrieves all pre-computed scores for that protein.
+
+### De novo scan (proteins not in database)
+
+For proteins **not** in the database, a full de novo scan is required. This can take several hours as it needs to:
+- Generate MSA alignments
+- Compute conservation scores
+- Generate embeddings for thousands of mutations
+
+To enable de novo scanning, add the `--scan` flag:
+
+```bash
+python run_pathos.py --protein Q12345 --scan --output Q12345_all.csv
+```
+
+**Warning:** De novo scans are computationally expensive. For a typical 500-residue protein, this means predicting ~9,500 mutations.
 
 ## Embeddings download
 Soon available
@@ -110,7 +153,7 @@ Soon available
 
 If you use PATHOS in your research, please cite:
 
-Radjasandirane, R., Cretin, G., Diharce, J., de Brevern, A. G., & Gelly, J. C. (2025). PATHOS: Predicting Variant Pathogenicity by Combining Protein Language Models and Biological Features. medRxiv, 2025-12.
+Radjasandirane, R., Cretin, G., Diharce, J., de Brevern, A. G., & Gelly, J. C. (2026). PATHOS: Predicting Variant Pathogenicity by Combining Protein Language Models and Biological Features. Artificial Intelligence in the Life Sciences, 100165.
 
 
 ## Contact
