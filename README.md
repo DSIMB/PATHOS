@@ -35,7 +35,14 @@ python run_pathos.py --file example_input.txt --output results.csv
 ### Filter results by score
 
 ```bash
+# Keep only highly pathogenic variants
 python run_pathos.py --protein P51787 --min-score 0.9 --output pathogenic.csv
+
+# Keep only highly benign variants
+python run_pathos.py --protein P51787 --max-score 0.1 --output benign.csv
+
+# Keep variants in a specific range
+python run_pathos.py --protein P51787 --min-score 0.4 --max-score 0.7 --output uncertain.csv
 ```
 
 ### Full protein scan
@@ -111,6 +118,7 @@ Full list of available options for `run_pathos.py`.
 | `-f, --file` | Input file with protein IDs and mutations (TXT, TSV, or CSV) |
 | `-o, --output` | Output CSV file (default: stdout for single mutation) |
 | `--min-score` | Minimum PATHOS score threshold for filtering results (0.0-1.0) |
+| `--max-score` | Maximum PATHOS score threshold for filtering results (0.0-1.0) |
 | `--scan` | Enable de novo full protein scan (required for proteins not in database) |
 | `--n-jobs` | Number of parallel workers for feature generation (default: 5) |
 | `--batch-size` | Batch size for embedding generation (default: 100) |
