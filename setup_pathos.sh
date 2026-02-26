@@ -5,7 +5,7 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DATABASE_DIR="${SCRIPT_DIR}/database2"
+DATABASE_DIR="${SCRIPT_DIR}/database"
 
 echo "=== PATHOS Setup ==="
 
