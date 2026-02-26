@@ -16,7 +16,7 @@ conda activate PATHOS_env
 ```
 
 
-## Usage
+## Quick start
 
 Query pathogenicity scores for protein variants using UniProt IDs and mutation notation.
 
