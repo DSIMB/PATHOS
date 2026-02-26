@@ -23,7 +23,7 @@ Query pathogenicity scores for protein variants using UniProt IDs and mutation n
 ### Single mutation query
 
 ```bash
-python run_pathos.py --protein P16501 --mutation M1A
+python run_pathos.py --protein P51787 --mutation M1A
 ```
 
 ### Batch query from file
@@ -35,7 +35,7 @@ python run_pathos.py --file variants.txt --output results.csv
 ### Filter results
 
 ```bash
-python run_pathos.py --protein P16501 --min-score 0.9 --output pathogenic.csv
+python run_pathos.py --protein P51787 --min-score 0.9 --output pathogenic.csv
 ```
 
 ### Input file format
@@ -45,7 +45,7 @@ Supports TXT, TSV, and CSV formats. Headers are auto-detected and skipped.
 **TXT/TSV (space or tab-separated):**
 
 ```
-P16501 M1A R56V    # Multiple mutations per line
+P51787 M1A R56V    # Multiple mutations per line
 Q9Y6X3 M1C         # Single mutation
 P10635             # Full scan (all 19 substitutions per position)
 ```
@@ -54,8 +54,8 @@ P10635             # Full scan (all 19 substitutions per position)
 
 ```csv
 Protein,Mutation
-P16501,M1A
-P16501,R56V
+P51787,M1A
+P51787,L50R
 Q9Y6X3,M1C
 ```
 
