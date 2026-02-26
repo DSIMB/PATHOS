@@ -45,7 +45,7 @@ python run_pathos.py --protein P51787 --min-score 0.9 --output pathogenic.csv
 python run_pathos.py --protein P51787 --output P51787_all.csv
 
 # For proteins NOT in database (requires --scan, can take hours)
-python run_pathos.py --protein Q12345 --scan --output Q12345_all.csv
+python run_pathos.py --protein Q96PN7 --scan --output Q96PN7_all.csv
 ```
 
 ### Input file format
@@ -131,6 +131,8 @@ python run_pathos.py --protein P51787 --output P51787_all.csv
 
 This instantly retrieves all pre-computed scores for that protein.
 
+The list of 17,574 pre-computed human proteins (having less than 1,024 residues) is available in [`proteins_in_db.txt`](proteins_in_db.txt).
+
 ### De novo scan (proteins not in database)
 
 For proteins **not** in the database, a full de novo scan is required. This can take several hours as it needs to:
@@ -141,7 +143,7 @@ For proteins **not** in the database, a full de novo scan is required. This can 
 To enable de novo scanning, add the `--scan` flag:
 
 ```bash
-python run_pathos.py --protein Q12345 --scan --output Q12345_all.csv
+python run_pathos.py --protein Q96PN7 --scan --output Q96PN7_all.csv
 ```
 
 **Warning:** De novo scans are computationally expensive. For a typical 500-residue protein, this means predicting ~9,500 mutations.
@@ -157,5 +159,7 @@ Radjasandirane, R., Cretin, G., Diharce, J., de Brevern, A. G., & Gelly, J. C. (
 
 
 ## Contact
+
+For bug reports, feature requests, or questions, please contact:
 
 radja.ragou@gmail.com
