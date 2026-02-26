@@ -11,7 +11,7 @@ echo "=== PATHOS Setup ==="
 
 # 1. Create conda environment
 echo "Creating conda environment..."
-#conda env create -f env/PATHOS_env.yml
+conda env create -f env/PATHOS_env.yml
 
 # 2. Change to database directory
 mkdir -p "$DATABASE_DIR"
