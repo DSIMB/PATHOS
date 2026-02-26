@@ -13,9 +13,6 @@ echo "=== PATHOS Setup ==="
 echo "Creating conda environment..."
 conda env create -f env/PATHOS_env.yml
 
-# 2. Change to database directory
-mkdir -p "$DATABASE_DIR"
-cd "$DATABASE_DIR"
 
 # Function to download and verify file integrity
 download_and_verify() {
@@ -52,7 +49,7 @@ download_and_verify() {
     fi
 }
 
-# 3. Download and verify files individually
+# 2. Download and verify files individually
 echo "Downloading database files from Zenodo..."
 
 # af_index.sqlite (1.4 GB)
@@ -67,7 +64,7 @@ download_and_verify "https://zenodo.org/records/18140238/files/MSAs.zip?download
 # pathos.db (10.3 GB)
 download_and_verify "https://zenodo.org/records/18140238/files/pathos.db?download=1" "pathos.db" "b0fac049b458b6c261c4f4f01ff958a3"
 
-# 4. Extract zip archives (we're in $DATABASE_DIR)
+# 3. Extract zip archives
 echo "Extracting archives into $DATABASE_DIR..."
 if [ -f MSAs.zip ]; then
     unzip -o MSAs.zip -d "$DATABASE_DIR" && rm MSAs.zip
@@ -77,6 +74,9 @@ if [ -f mmseqs_db.zip ]; then
 fi
 if [ -f database/fastas.zip ]; then
     unzip -o database/fastas.zip -d "$DATABASE_DIR" && rm database/fastas.zip
+fi
+if [ -f af_index.sqlite ]; then
+    mv af_index.sqlite "$DATABASE_DIR/af_index.sqlite"
 fi
 
 cd ..
