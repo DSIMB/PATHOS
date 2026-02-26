@@ -67,16 +67,16 @@ download_and_verify "https://zenodo.org/records/18140238/files/MSAs.zip?download
 # pathos.db (10.3 GB)
 download_and_verify "https://zenodo.org/records/18140238/files/pathos.db?download=1" "pathos.db" "b0fac049b458b6c261c4f4f01ff958a3"
 
-# 4. Extract zip archives
-echo "Extracting archives..."
+# 4. Extract zip archives (we're in $DATABASE_DIR)
+echo "Extracting archives into $DATABASE_DIR..."
 if [ -f MSAs.zip ]; then
-    unzip -o MSAs.zip && rm MSAs.zip
+    unzip -o MSAs.zip -d "$DATABASE_DIR" && rm MSAs.zip
 fi
 if [ -f mmseqs_db.zip ]; then
-    unzip -o mmseqs_db.zip && rm mmseqs_db.zip
+    unzip -o mmseqs_db.zip -d "$DATABASE_DIR" && rm mmseqs_db.zip
 fi
 if [ -f database/fastas.zip ]; then
-    unzip -o database/fastas.zip && rm database/fastas.zip
+    unzip -o database/fastas.zip -d "$DATABASE_DIR" && rm database/fastas.zip
 fi
 
 cd ..
