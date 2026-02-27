@@ -1343,7 +1343,6 @@ def load_plm_model(model_name: str, device: torch.device):
     """Load protein language model"""
     try:
         if model_name == "ankh2_large":
-            print(f"        Loading Ankh2 Large...")
             model = T5EncoderModel.from_pretrained(
                 "ElnaggarLab/ankh2-ext2",
                 revision="4c155ee6b1aeb7f29ebf06a0399b331504104b67",
@@ -1354,7 +1353,6 @@ def load_plm_model(model_name: str, device: torch.device):
                 revision="4c155ee6b1aeb7f29ebf06a0399b331504104b67"
             )
         elif model_name == "esmc_600m":
-            print(f"        Loading ESMC 600M...")
             model = AutoModelForMaskedLM.from_pretrained(
                 "Synthyra/ESMplusplus_large",
                 revision="1408244c8c08fb1b593da75b912b56a1688be86e",
@@ -1670,14 +1668,10 @@ def process_variants_batched(
     wt_cache = {}
     
     print(f"    Processing {len(variants_to_process)} variants in {n_batches} batches of {batch_size}")
-    print(f"    Mode: ESMC then Ankh2 (both on GPU, sequential)\n")
     
     def generate_embeddings_for_plm(plm_name, batch_variants, model, tokenizer):
         """Generate embeddings for a specific PLM on GPU"""
         embeddings = {}
-        
-        start_time = time.time()
-        print(f"      [{plm_name}] Started on GPU ({len(batch_variants)} variants)")
         
         with torch.no_grad():
             for i, (protein_id, mutation) in enumerate(batch_variants):
@@ -1721,22 +1715,16 @@ def process_variants_batched(
                 except Exception as e:
                     continue
         
-        elapsed = time.time() - start_time
-        print(f"      [{plm_name}] Finished on GPU in {elapsed:.1f}s ({len(embeddings)//2} variants)")
-        
         return embeddings
     
     # Load and process with ESMC first
-    print(f"    Loading esmc_600m on GPU...")
+    print(f"    Loading ESMC...")
     esmc_model, esmc_tokenizer = load_plm_model("esmc_600m", gpu_device)
-    print(f"    Running ESMC...")
     
-    for batch_idx in range(n_batches):
+    for batch_idx in tqdm(range(n_batches), desc="    ESMC batches", leave=False):
         start_idx = batch_idx * batch_size
         end_idx = min(start_idx + batch_size, len(variants_to_process))
         batch_variants = variants_to_process[start_idx:end_idx]
-        
-        print(f"    Batch {batch_idx + 1}/{n_batches} ({len(batch_variants)} variants) - ESMC")
         
         batch_embeddings = {"esmc_600m": generate_embeddings_for_plm("esmc_600m", batch_variants, esmc_model, esmc_tokenizer)}
         
@@ -1754,16 +1742,13 @@ def process_variants_batched(
     wt_cache = {k: v for k, v in wt_cache.items() if k[0] != "esmc_600m"}
     
     # Load and process with Ankh2
-    print(f"\n    Loading ankh2_large on GPU...")
+    print(f"    Loading Ankh2...")
     ankh_model, ankh_tokenizer = load_plm_model("ankh2_large", gpu_device)
-    print(f"    Running Ankh2...")
     
-    for batch_idx in range(n_batches):
+    for batch_idx in tqdm(range(n_batches), desc="    Ankh2 batches", leave=False):
         start_idx = batch_idx * batch_size
         end_idx = min(start_idx + batch_size, len(variants_to_process))
         batch_variants = variants_to_process[start_idx:end_idx]
-        
-        print(f"    Batch {batch_idx + 1}/{n_batches} ({len(batch_variants)} variants) - Ankh2")
         
         ankh_embeddings = generate_embeddings_for_plm("ankh2_large", batch_variants, ankh_model, ankh_tokenizer)
         
@@ -1773,8 +1758,6 @@ def process_variants_batched(
                          if any(f"{p}_{m}" in k for p, m in batch_variants)},
             "ankh2_large": ankh_embeddings
         }
-        
-        print(f"      Running PATHOS inference...")
         
         # Run PATHOS inference for this batch (on GPU, average both PLMs)
         for protein_id, mutation in batch_variants:
