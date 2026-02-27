@@ -42,7 +42,7 @@ python run_pathos.py --protein P51787 --min-score 0.9 --output pathogenic.csv
 python run_pathos.py --protein P51787 --max-score 0.1 --output benign.csv
 
 # Keep variants in a specific range
-python run_pathos.py --protein P51787 --min-score 0.4 --max-score 0.7 --output uncertain.csv
+python run_pathos.py --protein P51787 --min-score 0.55 --max-score 0.65 --output uncertain.csv
 ```
 
 ### Full protein scan
