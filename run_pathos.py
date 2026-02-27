@@ -1428,13 +1428,19 @@ def generate_embeddings_for_variants(
     device: torch.device
 ) -> Dict[str, torch.Tensor]:
     """Generate embeddings for wild-type and mutant sequences"""
+    # Print loading message
+    if model_name == "esmc_600m":
+        print(f"        Loading ESMC...")
+    elif model_name == "ankh2_large":
+        print(f"        Loading Ankh2...")
+    
     model, tokenizer = load_plm_model(model_name, device)
     
     # Print running message
     if model_name == "esmc_600m":
-        print(f"        Running ESMC 600M...")
+        print(f"        Running ESMC...")
     elif model_name == "ankh2_large":
-        print(f"        Running Ankh2 Large...")
+        print(f"        Running Ankh2...")
     
     all_embeddings = {}
     
@@ -1720,6 +1726,7 @@ def process_variants_batched(
     # Load and process with ESMC first
     print(f"    Loading ESMC...")
     esmc_model, esmc_tokenizer = load_plm_model("esmc_600m", gpu_device)
+    print(f"    Running ESMC...")
     
     for batch_idx in tqdm(range(n_batches), desc="    ESMC batches", leave=False):
         start_idx = batch_idx * batch_size
@@ -1744,6 +1751,7 @@ def process_variants_batched(
     # Load and process with Ankh2
     print(f"    Loading Ankh2...")
     ankh_model, ankh_tokenizer = load_plm_model("ankh2_large", gpu_device)
+    print(f"    Running Ankh2...")
     
     for batch_idx in tqdm(range(n_batches), desc="    Ankh2 batches", leave=False):
         start_idx = batch_idx * batch_size
@@ -1759,7 +1767,7 @@ def process_variants_batched(
             "ankh2_large": ankh_embeddings
         }
         
-        # Run PATHOS inference for this batch (on GPU, average both PLMs)
+        # Run PATHOS inference for this batch
         for protein_id, mutation in batch_variants:
             feat_key = (protein_id, mutation)
             
@@ -1921,6 +1929,11 @@ def main():
         action="store_true",
         help="Enable de novo full protein scan (required when protein is not in database). Warning: this can take a very long time."
     )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Force de novo prediction even for variants in database (for debugging)"
+    )
     
     args = parser.parse_args()
     
@@ -1980,11 +1993,11 @@ def main():
         print(f"       Run setup_pathos.sh to download the database.")
         sys.exit(1)
     
-    total_steps = 8
+    total_steps = 7
     start_time = time.time()
     
-    # Step 1: Parse input based on mode
-    print(f"\n[1/{total_steps}] Parsing input...")
+    # Step 1: Parse input and query database
+    print(f"\n[1/{total_steps}] Parsing input and querying database...")
     
     if input_mode == "file":
         # File input mode
@@ -2080,30 +2093,39 @@ def main():
         sys.exit(0)
     
     unique_proteins = list(set([protein_id for protein_id, _ in variants]))
+    
+    if args.force:
+        # Force mode: skip database, predict all variants de novo
+        db_results = {(p, m): None for p, m in variants}
+        variants_in_db = []
+        variants_to_process = list(variants)
+    else:
+        db_results = query_database(DB_PATH, variants)
+        variants_in_db = [(p, m) for (p, m) in variants if db_results[(p, m)] is not None]
+        variants_to_process = [(p, m) for (p, m) in variants if db_results[(p, m)] is None]
+    
     if len(unique_proteins) == 1:
         print(f"    Total: {len(variants)} variants")
     else:
         print(f"    Total: {len(variants)} variants across {len(unique_proteins)} proteins")
     
-    # Step 2: Query database for existing predictions (no sequences needed)
-    print(f"\n[2/{total_steps}] Querying PATHOS database for existing predictions...")
-    db_results = query_database(DB_PATH, variants)
-    variants_in_db = [(p, m) for (p, m) in variants if db_results[(p, m)] is not None]
-    variants_to_process = [(p, m) for (p, m) in variants if db_results[(p, m)] is None]
-    print(f"    {len(variants_in_db)} found in database, {len(variants_to_process)} need de novo prediction")
+    if args.force:
+        print(f"    Force mode: predicting all {len(variants_to_process)} variants de novo")
+    else:
+        print(f"    {len(variants_in_db)} found in database, {len(variants_to_process)} need de novo prediction")
     
     new_predictions = {}
     valid_variants = list(variants)  # Start with all variants
     
     if variants_to_process:
-        # Step 3: Load UniProt sequences
+        # Step 2: Load UniProt sequences
         proteins_to_load = list(set([p for p, m in variants_to_process]))
-        print(f"\n[3/{total_steps}] Loading UniProt sequences for {len(proteins_to_load)} proteins...")
+        print(f"\n[2/{total_steps}] Loading UniProt sequences for {len(proteins_to_load)} proteins...")
         sequences = load_fasta_sequences(FASTA_PATH, protein_ids=proteins_to_load)
         print(f"    Loaded {len(sequences)} sequences from FASTA")
         
-        # Step 4: Validate mutations against sequences
-        print(f"\n[4/{total_steps}] Validating mutations against UniProt sequences...")
+        # Step 3: Validate mutations against sequences
+        print(f"\n[3/{total_steps}] Validating mutations against UniProt sequences...")
         validated_variants = []
         invalid_count = 0
         for protein_id, mutation in variants_to_process:
@@ -2121,7 +2143,7 @@ def main():
             
             # Check and generate MSAs for all proteins (PASTML is always enabled)
             proteins_needing_msa = list(set([p for p, _ in variants_to_process]))
-            print(f"\n[5/{total_steps}] Checking MSA availability for {len(proteins_needing_msa)} proteins...")
+            print(f"\n[4/{total_steps}] Checking MSA availability for {len(proteins_needing_msa)} proteins...")
             
             available_msas, generated_msas, failed_msas = check_and_generate_msas(
                 proteins_needing_msa,
@@ -2139,7 +2161,7 @@ def main():
             
             # Generate features
             n_workers = max(1, multiprocessing.cpu_count() - 1) if args.n_jobs == -1 else args.n_jobs
-            print(f"\n[6/{total_steps}] Generating features for {len(variants_to_process)} variants ({n_workers} workers)...")
+            print(f"\n[5/{total_steps}] Generating features for {len(variants_to_process)} variants ({n_workers} workers)...")
             print(f"    - PASTML: computing conservation scores")
             print(f"    - AF: querying allele frequencies from gnomAD")
             print(f"    - STRING: loading protein interaction scores")
@@ -2158,10 +2180,10 @@ def main():
                 mammals_db=MAMMALS_DB
             )
             
-            # Step 7-8: Generate embeddings and run inference
+            # Step 6-7: Generate embeddings and run inference
             # Use batched mode for large datasets to save memory
             if len(variants_to_process) > args.batch_threshold:
-                print(f"\n[7-8/{total_steps}] Generating embeddings and running inference (batched mode for {len(variants_to_process)} variants)...")
+                print(f"\n[6-7/{total_steps}] Generating embeddings and running inference (batched mode for {len(variants_to_process)} variants)...")
                 new_predictions = process_variants_batched(
                     variants_to_process,
                     sequences,
@@ -2172,7 +2194,7 @@ def main():
                 )
             else:
                 # Standard mode: generate all embeddings sequentially, then run inference
-                print(f"\n[7/{total_steps}] Generating WT and mutant embeddings with PLMs...")
+                print(f"\n[6/{total_steps}] Generating WT and mutant embeddings with PLMs...")
                 print(f"    ESMC 600M:")
                 embeddings_esmc = generate_embeddings_for_variants(
                     variants_to_process, sequences, "esmc_600m", DEVICE
@@ -2182,7 +2204,7 @@ def main():
                     variants_to_process, sequences, "ankh2_large", DEVICE
                 )
                 
-                print(f"\n[8/{total_steps}] Running PATHOS inference...")
+                print(f"\n[7/{total_steps}] Running PATHOS inference...")
                 new_predictions = run_pathos_inference(
                     variants_to_process,
                     embeddings_esmc,
@@ -2192,7 +2214,7 @@ def main():
                     MODELS_FOLDER
                 )
     else:
-        print(f"\n[3-8/{total_steps}] All variants found in database, skipping prediction steps.")
+        print(f"\n[2-7/{total_steps}] All variants found in database, skipping prediction steps.")
     
     # Update valid_variants to include only those we have results for
     valid_variants = variants_in_db + list(new_predictions.keys())
