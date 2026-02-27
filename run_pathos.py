@@ -2155,7 +2155,7 @@ def main():
                 print(f"    Failed to generate: {len(failed_msas)} (PASTML will return NaN for these)")
             
             # Generate features
-            n_workers = args.n_jobs if args.n_jobs else max(1, multiprocessing.cpu_count() - 1)
+            n_workers = max(1, multiprocessing.cpu_count() - 1) if args.n_jobs == -1 else args.n_jobs
             print(f"\n[6/{total_steps}] Generating features for {len(variants_to_process)} variants ({n_workers} workers)...")
             print(f"    - PASTML: computing conservation scores")
             print(f"    - AF: querying allele frequencies from gnomAD")
@@ -2170,7 +2170,7 @@ def main():
                 pastml_cache=PASTML_CACHE,
                 compute_pastml=True,
                 af_sqlite=AF_SQLITE_PATH,
-                n_jobs=args.n_jobs,
+                n_jobs=n_workers,
                 fasta_folder=FASTA_FOLDER,
                 mammals_db=MAMMALS_DB
             )
