@@ -1505,6 +1505,10 @@ def embed_sequence(sequence: str, model, tokenizer, model_name: str, device: tor
         seq_len = (attention_mask[0] == 1).sum()
         clean_emb = embeddings[0][:seq_len-1]
         
+        # Verify embedding length matches sequence length
+        if clean_emb.shape[0] != len(sequence):
+            raise ValueError(f"Ankh2 embedding length {clean_emb.shape[0]} != sequence length {len(sequence)}")
+        
         return clean_emb.float().cpu()
     
     elif model_name == "esmc_600m":
@@ -1520,7 +1524,12 @@ def embed_sequence(sequence: str, model, tokenizer, model_name: str, device: tor
         embeddings = model(**outputs).last_hidden_state
         attention_mask = outputs['attention_mask']
         seq_len = attention_mask[0].sum().item()
-        clean_emb = embeddings[0][1:seq_len]
+        # ESM adds CLS at start and EOS at end, skip both
+        clean_emb = embeddings[0][1:seq_len-1]
+        
+        # Verify embedding length matches sequence length
+        if clean_emb.shape[0] != len(sequence):
+            raise ValueError(f"ESMC embedding length {clean_emb.shape[0]} != sequence length {len(sequence)}")
         
         return clean_emb.float().cpu()
 
