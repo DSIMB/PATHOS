@@ -78,6 +78,9 @@ fi
 if [ -f af_index.sqlite ]; then
     mv af_index.sqlite "$DATABASE_DIR/af_index.sqlite"
 fi
+if [ -f pathos.db ]; then
+    mv pathos.db "$DATABASE_DIR/pathos.db"
+fi
 
 cd ..
 
