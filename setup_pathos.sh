@@ -75,6 +75,9 @@ fi
 if [ -f database/fastas.zip ]; then
     unzip -o database/fastas.zip -d "$DATABASE_DIR" && rm database/fastas.zip
 fi
+if [ -f database/uniprot.zip ]; then
+    unzip -o database/uniprot.zip -d "$DATABASE_DIR" && rm database/uniprot.zip
+fi
 if [ -f af_index.sqlite ]; then
     mv af_index.sqlite "$DATABASE_DIR/af_index.sqlite"
 fi
