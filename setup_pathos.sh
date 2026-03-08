@@ -62,7 +62,7 @@ download_and_verify "https://zenodo.org/records/18910504/files/mmseqs_db.zip?dow
 download_and_verify "https://zenodo.org/records/18910504/files/MSAs.zip?download=1" "MSAs.zip" "b5c91e87441f2c98737cfb7f4132c97a"
 
 # pathos.db (10.3 GB)
-download_and_verify "https://zenodo.org/records/18910504/files/pathos.db?download=1" "pathos.db" "26519d531308515502aaecd86c508f64"
+download_and_verify "https://zenodo.org/records/18910504/files/pathos.db?download=1" "pathos.db" "87607336a34209c82ee5fc9ca4a6f7ef"
 
 # 3. Extract zip archives
 echo "Extracting archives into $DATABASE_DIR..."
