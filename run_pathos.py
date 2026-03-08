@@ -76,10 +76,14 @@ DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 PLM_MODELS = ["esmc_600m", "ankh2_large"]
 PLM_EMBEDDING_DIMS = {"esmc_600m": 1152, "ankh2_large": 1536}
 
+# Debug flag (set from --debug arg in __main__)
+DEBUG = False
+
 # Feature transformation parameters (from training data)
-PARAM_PASTML = {'log_min': -9.400765740838802, 'log_max': 1.4426951595367387e-09}                                                                                                                                
-PARAM_AF = {'log_min': -20.477300046830425, 'log_max': -1.460410576505362e-06}
-PARAM_STRING = {'log_min': -10.629354334852547, 'log_max': -0.8828422962808098}
+PARAM_PASTML = {'log_min': -9.400938817005075, 'log_max': 0.0002723707610688847}
+PARAM_AF = {'log_min': -20.477300046830425, 'log_max': -1.4604105764703945e-06}
+PARAM_STRING = {'log_min': -10.629354334852511, 'log_max': -0.8828422962808311}
+
 
 # Amino acid alphabet
 AA_ALPHABET = "ACDEFGHIKLMNPQRSTVWY"
@@ -543,157 +547,79 @@ def download_gff_from_uniprot(protein_id: str, output_path: str) -> bool:
         return False
 
 
-def get_matrix_annot(protein_id: str) -> Optional[np.ndarray]:
-    """Create annotation matrix from GFF file for a protein
-    
-    This implements the exact logic from generate_inputs.py:
-    - Creates a matrix of shape (max_seq_len, 18) for 18 selected annotation types
-    - Parses GFF file and marks positions with annotations
-    - Special handling for 'Disulfide bond' (marks both start and end positions)
-    - Trims matrix to last non-zero row
-    
-    Args:
-        protein_id: UniProt accession ID
-    
-    Returns:
-        Annotation matrix of shape (seq_length, 18) or None if GFF not found
-    """
-    # Define the 18 selected annotation types used by PATHOS (in order)
+def get_matrix_annot(protein_id: str, seq_length: int) -> Optional[np.ndarray]:
+    """Create annotation matrix from GFF file for a protein"""
     dict_index = {
-        'Beta strand': 0,
-        'Helix': 1,
-        'Natural variant': 2,
-        'Topological domain': 3,
-        'Mutagenesis': 4,
-        'Domain': 5,
-        'Region': 6,
-        'Alternative sequence': 7,
-        'Turn': 8,
-        'DNA binding': 9,
-        'Site': 10,
-        'Sequence conflict': 11,
-        'Disulfide bond': 12,
-        'Repeat': 13,
-        'Binding site': 14,
-        'Transmembrane': 15,
-        'Intramembrane': 16,
-        'Modified residue': 17
+        'Beta strand': 0, 'Helix': 1, 'Natural variant': 2, 'Topological domain': 3,
+        'Mutagenesis': 4, 'Domain': 5, 'Region': 6, 'Alternative sequence': 7,
+        'Turn': 8, 'DNA binding': 9, 'Site': 10, 'Sequence conflict': 11,
+        'Disulfide bond': 12, 'Repeat': 13, 'Binding site': 14, 'Transmembrane': 15,
+        'Intramembrane': 16, 'Modified residue': 17
     }
     
-    # GFF file path
     gff_file = os.path.join(GFF_FOLDER, f"{protein_id}.gff")
     
-    # If not found, try to download it
     if not os.path.exists(gff_file):
         os.makedirs(GFF_FOLDER, exist_ok=True)
         if not download_gff_from_uniprot(protein_id, gff_file):
-            return None
-    
-    # Parse GFF file
+            return np.zeros((seq_length, 18), dtype=int) # Return empty matrix of CORRECT size
+            
     try:
-        annot_matrix = np.zeros((40000, 18), dtype=int)
+        # Build matrix to exact sequence length. No trimming!
+        annot_matrix = np.zeros((seq_length, 18), dtype=int)
         
         with open(gff_file) as f:
-            f.readline()  # Skip header
             for line in f:
-                if line.startswith('#'):
-                    continue
+                if line.startswith('#'): continue
                 
                 items = line.strip().split("\t")
-                if len(items) < 5:
-                    continue
-                
-                # Check if "isoform" is in the description (last columns)
-                # GFF format has 9 columns, with attributes in column 9 (index 8)
-                if len(items) >= 9:
-                    # Check all columns from position 8 onwards for "isoform"
-                    description = "\t".join(items[8:]).lower()
-                    if "isoform" in description:
-                        continue  # Skip this annotation
+                if len(items) < 5: continue
                 
                 annot = items[2]
-                if annot not in dict_index:
+
+                if annot not in dict_index: 
                     continue
                 
-                try:
-                    start_pos = int(items[3])
-                    end_pos = int(items[4])
-                    annot_index = dict_index[annot]
-                    
-                    if annot != "Disulfide bond":
-                        # Mark all positions in the range
-                        annot_matrix[start_pos - 1:end_pos, annot_index] = 1
-                    else:
-                        # For disulfide bonds, mark only the two endpoints
-                        annot_matrix[start_pos - 1, annot_index] = 1
-                        annot_matrix[end_pos - 1, annot_index] = 1
-                except (ValueError, IndexError) as e:
-                    continue
-        
-        # Trim matrix to the last non-zero row
-        nonzero_rows = np.where(np.any(annot_matrix != 0, axis=1))[0]
-        if len(nonzero_rows) == 0:
-            return np.zeros((1, 18), dtype=int)
-        
-        last_nonzero_row = np.max(nonzero_rows)
-        trimmed_matrix = annot_matrix[:last_nonzero_row + 1]
-        
-        return trimmed_matrix
+                start_pos = min(int(items[3]), seq_length)
+                end_pos = min(int(items[4]), seq_length)
+                annot_index = dict_index[annot]
+                if annot != "Disulfide bond":
+                    annot_matrix[start_pos - 1:end_pos, annot_index] = 1
+                else:
+                    annot_matrix[start_pos - 1, annot_index] = 1
+                    annot_matrix[end_pos - 1, annot_index] = 1
+                
+        return annot_matrix
         
     except Exception as e:
-        return None
+        # Fallback to zeros of the correct size if parsing fails
+        return np.zeros((seq_length, 18), dtype=int)
 
+def window_annot(mutation, matrix, window_size=5):
+    _, position, _ = parse_mutation(mutation)
+    position_idx = position - 1
 
-def window_annot(mutation: str, matrix: np.ndarray, window_size: int = 5) -> List[int]:
-    """Extract annotation window around mutation position
-    
-    This implements the exact logic from generate_inputs.py:
-    - Extracts a window of ±window_size residues around the mutation
-    - Adjusts window if near sequence start/end
-    - Sums annotations across all positions in the window
-    - Returns binary vector (!=0)
-    
-    Args:
-        mutation: Mutation string (e.g., 'R50K')
-        matrix: Annotation matrix from get_matrix_annot (seq_length, 18)
-        window_size: Half-window size (default 5 = ±5 residues = 11 total)
-    
-    Returns:
-        List of 18 binary values (1 if annotation present in window, 0 otherwise)
-    """
-    # Extract position from mutation (1-based)
-    wt_aa, position, mut_aa = parse_mutation(mutation)
-    position_idx = position - 1  # Convert to 0-based index
-    
     total_length = matrix.shape[0]
-    
+
     left_part = window_size
     right_part = window_size
-    
-    # Adjust window if near the start
+
     if position_idx - left_part < 0:
         excess = left_part - position_idx
         left_part = position_idx
-        right_part += excess
-    
-    # Adjust window if near the end
+        right_part += excess    
+
     if position_idx + right_part >= total_length:
         excess = (position_idx + right_part + 1) - total_length
         right_part -= excess
         left_part += excess
-    
-    # Extract window and sum across positions
-    window_start = position_idx - left_part
-    window_end = position_idx + right_part + 1
-    
-    # Sum annotations across the window
-    window_sum = matrix[window_start:window_end].sum(axis=0)
-    
-    # Convert to binary (presence/absence)
-    return (window_sum != 0).astype(int).tolist()
+    final_matrix = matrix[position_idx - left_part: position_idx + right_part + 1].sum(axis=0)
+
+    return (final_matrix != 0).astype(int).tolist()
 
 
-def load_uniprot_annotations(protein_id: str, mutation: str, window_size: int = 5) -> List[int]:
+
+def load_uniprot_annotations(protein_id: str, mutation: str, sequence_length: int, window_size: int = 5) -> List[int]:
     """Load UniProt annotation features for a specific variant
     
     This is the main function that combines get_matrix_annot and window_annot
@@ -702,13 +628,14 @@ def load_uniprot_annotations(protein_id: str, mutation: str, window_size: int = 
     Args:
         protein_id: UniProt accession ID
         mutation: Mutation string (e.g., 'R50K')
+        sequence_length: Length of the protein sequence (used for window adjustment)
         window_size: Window size for annotation extraction (default 5)
     
     Returns:
         List of 18 binary values representing annotations in the window
     """
     # Get the full annotation matrix for this protein
-    matrix = get_matrix_annot(protein_id)
+    matrix = get_matrix_annot(protein_id, sequence_length)
     
     if matrix is None:
         return [0] * 18
@@ -924,7 +851,7 @@ def _process_variant_worker(args):
         wt_aa, position, mut_aa = parse_mutation(mutation)
         
         # Get annotation features
-        annot_features = load_uniprot_annotations(protein_id, mutation, window_size=5)
+        annot_features = load_uniprot_annotations(protein_id, mutation, len(seq), window_size=5)
         
         # Compute PASTML score
         if do_pastml and tree_path:
@@ -1052,7 +979,7 @@ def generate_features_for_variants(
                 wt_aa, position, mut_aa = parse_mutation(mutation)
                 
                 # Get annotation features
-                annot_features = load_uniprot_annotations(protein_id, mutation, window_size=5)
+                annot_features = load_uniprot_annotations(protein_id, mutation, len(sequence), window_size=5)
                 
                 # Compute PASTML score
                 if compute_pastml:
@@ -1083,12 +1010,28 @@ def generate_features_for_variants(
     
     df = pd.DataFrame(rows)
     
-    # Fill missing values and apply transformations
+    # Debug: print raw features before transformation
+    if DEBUG:
+        print(f"\n    DEBUG Raw features before transformation:")
+        for _, row in df.iterrows():
+            print(f"      {row['ID']} {row['Variation']}:")
+            print(f"        PASTML_raw={row['PASTML']}")
+            print(f"        AF_raw={row['AF']}")
+            print(f"        STRING_raw={row['STRING']}")
+            print(f"        ANNOTATIONS={row['ANNOTATIONS']}")
+        print(df)
+
     df['STRING'] = df['STRING'].fillna(0.05996573865027195)
     df['PASTML'] = transform_log2_minmax(df['PASTML'], PARAM_PASTML)
     df['AF'] = transform_log2_minmax(df['AF'], PARAM_AF)
     df['STRING'] = transform_log2_minmax(df['STRING'], PARAM_STRING)
     df['AF'] = df['AF'].fillna(0)
+
+    # Debug: print transformed features
+    if DEBUG:
+        print(f"\n    DEBUG Transformed features:")
+        for _, row in df.iterrows():
+            print(f"      {row['ID']} {row['Variation']}: PASTML={row['PASTML']}, AF={row['AF']}, STRING={row['STRING']}")
     
     return df
 
@@ -1417,7 +1360,13 @@ def truncate_sequence_for_mutation(sequence: str, mutation: str, window_size: in
     
     # Calculate adjusted position in truncated sequence (1-based)
     adjusted_position = seq_pos - start + 1
-    
+    if DEBUG:
+        try:
+            print(f"DEBUG Truncate: mutation={mutation} len_orig={len_seq} start={start} end={end} len_trunc={len(truncated_sequence)} adjusted_pos={adjusted_position}")
+            print(f"DEBUG Truncated sequence: {truncated_sequence}")
+        except Exception:
+            pass
+
     return truncated_sequence, adjusted_position, start
 
 
@@ -1451,7 +1400,6 @@ def generate_embeddings_for_variants(
             sequence = sequences.get(protein_id)
             if not sequence:
                 continue
-            
             try:
                 wt_aa, position, mut_aa = parse_mutation(mutation)
                 
@@ -1504,6 +1452,8 @@ def embed_sequence(sequence: str, model, tokenizer, model_name: str, device: tor
         embeddings = model(input_ids=input_ids, attention_mask=attention_mask).last_hidden_state
         seq_len = (attention_mask[0] == 1).sum()
         clean_emb = embeddings[0][:seq_len-1]
+        if DEBUG:
+            np.save("debug_ankh2_embedding.npy", clean_emb.cpu().numpy())
         
         # Verify embedding length matches sequence length
         if clean_emb.shape[0] != len(sequence):
@@ -1524,9 +1474,9 @@ def embed_sequence(sequence: str, model, tokenizer, model_name: str, device: tor
         embeddings = model(**outputs).last_hidden_state
         attention_mask = outputs['attention_mask']
         seq_len = attention_mask[0].sum().item()
-        # ESM adds CLS at start and EOS at end, skip both
         clean_emb = embeddings[0][1:seq_len-1]
-        
+        if DEBUG:
+            np.save("debug_esmc_embedding.npy", clean_emb.cpu().numpy())
         # Verify embedding length matches sequence length
         if clean_emb.shape[0] != len(sequence):
             raise ValueError(f"ESMC embedding length {clean_emb.shape[0]} != sequence length {len(sequence)}")
@@ -1602,36 +1552,54 @@ def run_pathos_inference(
         
         feat_data = features_lookup[feat_key]
         
+        # Debug: print features for this variant
+        if DEBUG:
+            print(f"\n    DEBUG Features for {protein_id} {mutation}:")
+            print(f"      PASTML: {feat_data['PASTML']}")
+            print(f"      AF: {feat_data['AF']}")
+            print(f"      STRING: {feat_data['STRING']}")
+            print(f"      ANNOTATIONS: {feat_data['ANNOTATIONS']}")
+
         for plm_name in PLM_MODELS:
             if plm_name == "esmc_600m":
                 embeddings = embeddings_esmc
             else:
                 embeddings = embeddings_ankh
-            
+
             mut_key = f"{protein_id}_{mutation}_mut_emb"
             wt_key = f"{protein_id}_{mutation}_wt_emb"
-            
+
             if mut_key not in embeddings or wt_key not in embeddings:
                 continue
-            
+
             mut_emb = embeddings[mut_key]
             wt_emb = embeddings[wt_key]
-            
+
+            # Debug: print embedding sums
+            if DEBUG:
+                print(f"      {plm_name} wt_emb sum: {wt_emb.sum().item()}")
+                print(f"      {plm_name} mut_emb sum: {mut_emb.sum().item()}")
+
             # Build feature vector
             features = torch.tensor([
                 feat_data['PASTML'],
                 feat_data['AF'],
                 feat_data['STRING']
             ] + feat_data['ANNOTATIONS'], dtype=torch.float32)
-            
+
             input_features = torch.cat([mut_emb, wt_emb, features]).unsqueeze(0).to(device)
-            
+
             with torch.no_grad():
                 score = models[plm_name](input_features).item()
+                if DEBUG:
+                    print(f"      {plm_name} score: {score}")
                 scores.append(score)
-        
+
         if scores:
-            predictions[(protein_id, mutation)] = np.mean(scores)
+            final_score = np.mean(scores)
+            if DEBUG:
+                print(f"      Final averaged score: {final_score}")
+            predictions[(protein_id, mutation)] = final_score
     
     return predictions
 
@@ -1786,30 +1754,47 @@ def process_variants_batched(
             feat_data = features_lookup[feat_key]
             scores = []
             
+            # Debug: print features for this variant
+            if DEBUG:
+                print(f"\n    DEBUG Features for {protein_id} {mutation}:")
+                print(f"      PASTML: {feat_data['PASTML']}")
+                print(f"      AF: {feat_data['AF']}")
+                print(f"      STRING: {feat_data['STRING']}")
+                print(f"      ANNOTATIONS: {feat_data['ANNOTATIONS']}")
+
             for plm_name in PLM_MODELS:
                 wt_key = f"{protein_id}_{mutation}_wt"
                 mut_key = f"{protein_id}_{mutation}_mut"
-                
+
                 if wt_key not in batch_embeddings[plm_name] or mut_key not in batch_embeddings[plm_name]:
                     continue
-                
+
                 wt_emb = batch_embeddings[plm_name][wt_key]
                 mut_emb = batch_embeddings[plm_name][mut_key]
-                
+
+                if DEBUG:
+                    print(f"      {plm_name} wt_emb sum: {wt_emb.sum().item()}")
+                    print(f"      {plm_name} mut_emb sum: {mut_emb.sum().item()}")
+
                 features = torch.tensor([
                     feat_data['PASTML'],
                     feat_data['AF'],
                     feat_data['STRING']
                 ] + feat_data['ANNOTATIONS'], dtype=torch.float32)
-                
+
                 input_features = torch.cat([mut_emb, wt_emb, features]).unsqueeze(0).to(gpu_device)
-                
+
                 with torch.no_grad():
                     score = pathos_models[plm_name](input_features).item()
+                if DEBUG:
+                    print(f"      {plm_name} score: {score}")
                 scores.append(score)
-            
+
             if scores:
-                all_predictions[(protein_id, mutation)] = np.mean(scores)
+                final_score = np.mean(scores)
+                if DEBUG:
+                    print(f"      Final averaged score: {final_score}")
+                all_predictions[(protein_id, mutation)] = final_score
         
         # Clear batch embeddings for this Ankh2 batch
         del batch_embeddings, ankh_embeddings
@@ -1930,8 +1915,8 @@ def main():
     parser.add_argument(
         "--batch-threshold",
         type=int,
-        default=10000,
-        help="Number of variants above which batched mode is enabled to save memory (default: 10000, use 0 to always batch)"
+        default=1000,
+        help="Number of variants above which batched mode is enabled to save memory (default: 1000, use 0 to always batch)"
     )
     parser.add_argument(
         "--scan",
@@ -1943,9 +1928,17 @@ def main():
         action="store_true",
         help="Force de novo prediction even for variants in database (for debugging)"
     )
-    
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Enable debug prints and save intermediate .npy embeddings"
+    )
+
     args = parser.parse_args()
-    
+
+    global DEBUG
+    DEBUG = args.debug
+
     # Validate input arguments: need either --protein or --file
     if not args.protein and not args.file:
         parser.error("At least one of --protein or --file is required")
