@@ -53,16 +53,16 @@ download_and_verify() {
 echo "Downloading database files from Zenodo..."
 
 # af_index.sqlite (1.4 GB)
-download_and_verify "https://zenodo.org/records/18140238/files/af_index.sqlite?download=1" "af_index.sqlite" "63a8e133b56ce22699076562975cff34"
+download_and_verify "https://zenodo.org/records/18910504/files/af_index.sqlite?download=1" "af_index.sqlite" "63a8e133b56ce22699076562975cff34"
 
 # mmseqs_db.zip (2.3 GB)
-download_and_verify "https://zenodo.org/records/18140238/files/mmseqs_db.zip?download=1" "mmseqs_db.zip" "823a681cc54a20b07efdf25245d641fb"
+download_and_verify "https://zenodo.org/records/18910504/files/mmseqs_db.zip?download=1" "mmseqs_db.zip" "823a681cc54a20b07efdf25245d641fb"
 
 # MSAs.zip (1.0 GB)
-download_and_verify "https://zenodo.org/records/18140238/files/MSAs.zip?download=1" "MSAs.zip" "b5c91e87441f2c98737cfb7f4132c97a"
+download_and_verify "https://zenodo.org/records/18910504/files/MSAs.zip?download=1" "MSAs.zip" "b5c91e87441f2c98737cfb7f4132c97a"
 
 # pathos.db (10.3 GB)
-download_and_verify "https://zenodo.org/records/18140238/files/pathos.db?download=1" "pathos.db" "b0fac049b458b6c261c4f4f01ff958a3"
+download_and_verify "https://zenodo.org/records/18910504/files/pathos.db?download=1" "pathos.db" "b0fac049b458b6c261c4f4f01ff958a3"
 
 # 3. Extract zip archives
 echo "Extracting archives into $DATABASE_DIR..."
