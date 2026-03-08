@@ -8,6 +8,7 @@ dependencies:
   - cxx-compiler
   - ninja
   - git
+  - pyarrow
   - pip
   - pip:
     - torch==2.6.0
