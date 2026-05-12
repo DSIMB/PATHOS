@@ -210,7 +210,7 @@ Each PLM configuration inherits the license of its source model: MIT for ESM-2, 
 
 ## Citation
 
-If you use PATHOS or its embeddings in your research, please cite:
+If you use PATHOS or PLM embeddings in your research, please cite:
 
 Radjasandirane, R., Cretin, G., Diharce, J., de Brevern, A. G., & Gelly, J. C. (2026). PATHOS: Predicting Variant Pathogenicity by Combining Protein Language Models and Biological Features. Artificial Intelligence in the Life Sciences, 100165.
 
