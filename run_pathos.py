@@ -8,17 +8,17 @@ results from both database queries and de novo predictions.
 
 Usage:
     python run_pathos.py --input variants.txt --output results.csv
-    
+
 Input format:
-    P16501 M1A R56V    
-    Q9Y6X3 M1C         
+    P16501 M1A R56V
+    Q9Y6X3 M1C
 """
+from __future__ import annotations
 
 import argparse
 import sqlite3
 import sys
 import os
-import torch
 import numpy as np
 import pandas as pd
 import requests
@@ -27,19 +27,71 @@ from typing import Dict, List, Tuple, Optional, Set
 from collections import defaultdict
 from concurrent.futures import ProcessPoolExecutor, as_completed
 import multiprocessing
-import torch.nn as nn
-from torch.utils.data import DataLoader, Dataset
-from safetensors import safe_open
-from safetensors.torch import save_file
-from transformers import T5EncoderModel, AutoTokenizer, AutoModelForMaskedLM
 from tqdm import tqdm
-# import warnings
-# warnings.filterwarnings('ignore')
 
-from ete3 import Tree
-from pastml.acr import pastml_pipeline
+# Heavy deps (torch, transformers, safetensors, ete3, pastml) are imported
+# lazily by _load_de_novo_deps() so that DB-only queries start instantly.
+torch = None
+nn = None
+DataLoader = None
+Dataset = None
+safe_open = None
+save_file = None
+T5EncoderModel = None
+AutoTokenizer = None
+AutoModelForMaskedLM = None
+Tree = None
+pastml_pipeline = None
+DEVICE = None
+FC_model = None
 
-# Get the directory where this script is located (works for git repo)
+_de_novo_deps_loaded = False
+
+def _load_de_novo_deps():
+    """Import all heavy dependencies needed for de novo prediction."""
+    global _de_novo_deps_loaded
+    if _de_novo_deps_loaded:
+        return
+    global torch, nn, DataLoader, Dataset, safe_open, save_file
+    global T5EncoderModel, AutoTokenizer, AutoModelForMaskedLM
+    global Tree, pastml_pipeline, DEVICE, FC_model
+
+    import torch as _torch
+    import torch.nn as _nn
+    from torch.utils.data import DataLoader as _DL, Dataset as _DS
+    from safetensors import safe_open as _so
+    from safetensors.torch import save_file as _sf
+    from transformers import T5EncoderModel as _T5, AutoTokenizer as _AT, AutoModelForMaskedLM as _AMLM
+    from ete3 import Tree as _Tree
+    from pastml.acr import pastml_pipeline as _pp
+
+    torch = _torch
+    nn = _nn
+    DataLoader = _DL
+    Dataset = _DS
+    safe_open = _so
+    save_file = _sf
+    T5EncoderModel = _T5
+    AutoTokenizer = _AT
+    AutoModelForMaskedLM = _AMLM
+    Tree = _Tree
+    pastml_pipeline = _pp
+    DEVICE = _torch.device("cuda" if _torch.cuda.is_available() else "cpu")
+
+    class _FC_model(_nn.Module):
+        """PATHOS prediction model"""
+        def __init__(self, input_size=6):
+            super(_FC_model, self).__init__()
+            self.model = _nn.Sequential(_nn.Linear(input_size, 1))
+            self.sigmoid = _nn.Sigmoid()
+
+        def forward(self, x):
+            return self.sigmoid(self.model(x))
+
+    FC_model = _FC_model
+    _de_novo_deps_loaded = True
+
+# Get the directory where this script is located
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # Fixed paths relative to script location
@@ -55,15 +107,6 @@ MODELS_FOLDER = os.path.join(SCRIPT_DIR, "models")
 GFF_FOLDER = os.path.join(SCRIPT_DIR, "database", "uniprot")
 STRING_PATH = os.path.join(SCRIPT_DIR, "database", "STRING_prot.tsv")
 
-# Checks if all required paths exist
-REQUIRED_PATHS = [DB_PATH, AF_SQLITE_PATH, FASTA_PATH,
-                TREE_PATH, MSA_FOLDER, MAMMALS_DB,
-                MODELS_FOLDER, STRING_PATH]   
-for path in REQUIRED_PATHS:
-    if not os.path.exists(path):
-        print(f"ERROR: Required path not found: {path}")
-        sys.exit(1)
-
 # Trained model checkpoint files
 TRAINED_MODELS = {
     "ankh2_large": "PATHOS_ankh2.ckpt",
@@ -71,13 +114,8 @@ TRAINED_MODELS = {
 }
 
 
-# Model configuration
-DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 PLM_MODELS = ["esmc_600m", "ankh2_large"]
 PLM_EMBEDDING_DIMS = {"esmc_600m": 1152, "ankh2_large": 1536}
-
-# Debug flag (set from --debug arg in __main__)
-DEBUG = False
 
 # Feature transformation parameters (from training data)
 PARAM_PASTML = {'log_min': -9.400938817005075, 'log_max': 0.0002723707610688847}
@@ -88,16 +126,6 @@ PARAM_STRING = {'log_min': -10.629354334852511, 'log_max': -0.8828422962808311}
 # Amino acid alphabet
 AA_ALPHABET = "ACDEFGHIKLMNPQRSTVWY"
 
-
-class FC_model(nn.Module):
-    """PATHOS prediction model"""
-    def __init__(self, input_size=6):
-        super(FC_model, self).__init__()
-        self.model = nn.Sequential(nn.Linear(input_size, 1))
-        self.sigmoid = nn.Sigmoid()
-
-    def forward(self, x):
-        return self.sigmoid(self.model(x))
 
 # ============================================================================
 # FEATURE GENERATION FUNCTIONS
@@ -114,18 +142,17 @@ def transform_log2_minmax(data, params):
 # PASTML CONSERVATION SCORE COMPUTATION
 # ============================================================================
 
-def check_and_generate_msas(protein_ids: List[str], msa_folder: str, fasta_folder: str, 
-                            mammals_db: str, mem_limit: str = "8G", debug: bool = False) -> Tuple[List[str], List[str], List[str]]:
+def check_and_generate_msas(protein_ids: List[str], msa_folder: str, fasta_folder: str,
+                            mammals_db: str, mem_limit: str = "8G") -> Tuple[List[str], List[str], List[str]]:
     """Check MSA availability for all proteins and generate missing ones
-    
+
     Args:
         protein_ids: List of UniProt IDs to check
         msa_folder: Path to MSA folder
         fasta_folder: Path to individual FASTA files
         mammals_db: Path to mammalsDB for mmseqs2
         mem_limit: Memory limit for mmseqs2 (default: 8G)
-        debug: Print debug information (default: False)
-    
+
     Returns:
         Tuple of (available_msas, generated_msas, failed_msas)
     """
@@ -161,143 +188,86 @@ def check_and_generate_msas(protein_ids: List[str], msa_folder: str, fasta_folde
             # Generate missing MSAs
             print(f"    Generating {len(to_generate)} MSAs with mmseqs2 (mem_limit={mem_limit})...")
             for protein_id in tqdm(to_generate, desc="    Generating MSAs", dynamic_ncols=True):
-                result = generate_msa_with_mmseqs(protein_id, fasta_folder, msa_folder, mammals_db, 
-                                                   mem_limit=mem_limit, debug=debug)
+                result = generate_msa_with_mmseqs(protein_id, fasta_folder, msa_folder, mammals_db,
+                                                   mem_limit=mem_limit)
                 if result:
                     generated.append(protein_id)
                 else:
                     failed.append(protein_id)
-                    if debug:
-                        print(f"      Failed to generate MSA for {protein_id}")
     
     return available, generated, failed
 
 
-def generate_msa_with_mmseqs(protein_id: str, fasta_folder: str, msa_folder: str, 
-                             mammals_db: str, mem_limit: str = "8G", debug: bool = False) -> Optional[str]:
+def generate_msa_with_mmseqs(protein_id: str, fasta_folder: str, msa_folder: str,
+                             mammals_db: str, mem_limit: str = "8G") -> Optional[str]:
     """Generate MSA using mmseqs2 if not already available
-    
+
     Args:
         protein_id: UniProt ID
         fasta_folder: Path to folder containing individual FASTA files
         msa_folder: Path to MSA output folder
         mammals_db: Path to mammalsDB (without extension)
         mem_limit: Memory limit for mmseqs2 (default: 8G)
-        debug: Print debug information (default: False)
-    
+
     Returns:
         Path to generated MSA file, or None if generation failed
     """
     import subprocess
     import shutil
-    
-    def debug_print(msg):
-        if debug:
-            print(f"      [DEBUG mmseqs] {msg}")
-    
-    # Check if mmseqs is available
+
     if shutil.which('mmseqs') is None:
-        debug_print("mmseqs not found in PATH")
         return None
-    
+
     fasta_file = os.path.join(fasta_folder, f"{protein_id}.fasta")
-    print(os.path.exists(fasta_file))
     if not os.path.exists(fasta_file):
-        debug_print(f"FASTA file not found: {fasta_file}")
         return None
-    
+
     if not os.path.exists(mammals_db):
-        debug_print(f"mammalsDB not found: {mammals_db}")
         return None
-    
-    # Output paths - use a temporary folder for intermediate files
+
     temp_folder = os.path.join(msa_folder, f".tmp_{protein_id}")
     os.makedirs(temp_folder, exist_ok=True)
-    
+
     path_queryDB = os.path.join(temp_folder, "queryDB")
     result_prefix = os.path.join(temp_folder, f"result_{protein_id}")
     tmp_folder = os.path.join(temp_folder, "tmp")
     msa_result = os.path.join(temp_folder, f"result_{protein_id}_msa")
     unpack_dir = os.path.join(temp_folder, "unpack")
-    
-    # Final MSA path directly in msa_folder
     final_msa = os.path.join(msa_folder, protein_id)
-    
-    debug_print(f"Starting MSA generation for {protein_id}")
-    debug_print(f"  FASTA: {fasta_file}")
-    debug_print(f"  Temp folder: {temp_folder}")
-    debug_print(f"  Final MSA: {final_msa}")
-    debug_print(f"  Memory limit: {mem_limit}")
-    
+
     try:
-        # Step 1: Create query database
-        debug_print("Step 1/5: Creating query database...")
-        result = subprocess.run(
+        subprocess.run(
             ['mmseqs', 'createdb', fasta_file, path_queryDB],
             check=True, capture_output=True, text=True
         )
-        if debug and result.stderr:
-            debug_print(f"  stderr: {result.stderr[:200]}")
-        
-        # Step 2: Search against mammalsDB (with memory limit)
-        debug_print("Step 2/5: Searching against mammalsDB...")
-        result = subprocess.run(
+        subprocess.run(
             ['mmseqs', 'search', path_queryDB, mammals_db, result_prefix, tmp_folder,
              '--max-seqs', '5000', '--min-seq-id', '0.5', '--split-memory-limit', mem_limit],
             check=True, capture_output=True, text=True
         )
-        if debug and result.stderr:
-            debug_print(f"  stderr: {result.stderr[:200]}")
-        
-        # Step 3: Convert alignments
-        debug_print("Step 3/5: Converting alignments...")
-        result = subprocess.run(
+        subprocess.run(
             ['mmseqs', 'convertalis', path_queryDB, mammals_db, result_prefix, f"{result_prefix}.m8"],
             check=True, capture_output=True, text=True
         )
-        if debug and result.stderr:
-            debug_print(f"  stderr: {result.stderr[:200]}")
-        
-        # Step 4: Generate MSA
-        debug_print("Step 4/5: Generating MSA...")
-        result = subprocess.run(
+        subprocess.run(
             ['mmseqs', 'result2msa', path_queryDB, mammals_db, result_prefix, msa_result],
             check=True, capture_output=True, text=True
         )
-        if debug and result.stderr:
-            debug_print(f"  stderr: {result.stderr[:200]}")
-        
-        # Step 5: Unpack MSA
-        debug_print("Step 5/5: Unpacking MSA...")
-        result = subprocess.run(
+        subprocess.run(
             ['mmseqs', 'unpackdb', msa_result, unpack_dir, '--unpack-name-mode', '0'],
             check=True, capture_output=True, text=True
         )
-        if debug and result.stderr:
-            debug_print(f"  stderr: {result.stderr[:200]}")
-        
-        # Step 6: Move final MSA to msa_folder and cleanup
+
         msa_output = os.path.join(unpack_dir, "0")
-        
         if os.path.exists(msa_output):
             shutil.move(msa_output, final_msa)
-            # Remove temporary folder
             shutil.rmtree(temp_folder, ignore_errors=True)
-            debug_print(f"MSA generated successfully: {final_msa}")
             return final_msa
-        
-        debug_print(f"MSA output file not found: {msa_output}")
+
         shutil.rmtree(temp_folder, ignore_errors=True)
         return None
-        
-    except subprocess.CalledProcessError as e:
-        debug_print(f"mmseqs command failed: {e.cmd}")
-        debug_print(f"  Return code: {e.returncode}")
-        debug_print(f"  stderr: {e.stderr[:500] if e.stderr else 'None'}")
-        shutil.rmtree(temp_folder, ignore_errors=True)
-        return None
-    except Exception as e:
-        debug_print(f"Exception: {type(e).__name__}: {e}")
+
+    except (subprocess.CalledProcessError, Exception):
         shutil.rmtree(temp_folder, ignore_errors=True)
         return None
 
@@ -383,14 +353,13 @@ def prune_phylo_tree(tree: 'Tree', msa_organisms: List[str], output_file: str) -
     all_nodes = tree.get_descendants() + [tree]
     tree_node_names = {node.name for node in all_nodes}
     
-    # Keep only organisms present in both tree and MSA
     keep_org = [org for org in msa_organisms if org in tree_node_names]
     
     if len(keep_org) < 2:
         return None
     
     pruned_tree = tree.copy()
-    pruned_tree.prune(keep_org)  # Don't preserve branch length
+    pruned_tree.prune(keep_org)
     
     # Write pruned tree
     with open(output_file, "w") as f:
@@ -648,17 +617,17 @@ def load_uniprot_annotations(protein_id: str, mutation: str, sequence_length: in
 
 def get_gene_name_from_uniprot(uniprot_id: str) -> Optional[str]:
     """Query UniProt API to get gene name for a UniProt ID
-    
+
     Args:
         uniprot_id: UniProt accession ID
-    
+
     Returns:
         Gene name or None if not found
     """
     try:
         url = f"https://rest.uniprot.org/uniprotkb/{uniprot_id}.json"
         response = requests.get(url, timeout=10)
-        
+
         if response.status_code == 200:
             data = response.json()
             # Try to get the primary gene name
@@ -668,28 +637,29 @@ def get_gene_name_from_uniprot(uniprot_id: str) -> Optional[str]:
                     return gene_name
     except Exception as e:
         pass
-    
+
     return None
 
 
 def load_gene_names(protein_ids: List[str]) -> Dict[str, str]:
     """Load gene names for proteins from UniProt API
-    
+
     Args:
         protein_ids: List of UniProt IDs
-    
+
     Returns:
         Dictionary mapping UniProt ID to gene name
     """
     gene_dict = {}
-    
+
     for pid in tqdm(protein_ids, desc="Fetching gene names", dynamic_ncols=True):
         gene_name = get_gene_name_from_uniprot(pid)
         if gene_name:
             gene_dict[pid] = gene_name
         time.sleep(0.1)  # Rate limiting
-    
+
     return gene_dict
+
 
 
 def load_allele_frequency(protein_id: str, mutation: str, gene_name: str, af_sqlite: str) -> float:
@@ -811,27 +781,6 @@ def load_string_scores_batch(protein_ids: List[str]) -> Dict[str, float]:
     return string_scores
 
 
-def load_string_score(protein_id: str) -> float:
-    """Load STRING interaction score for a protein
-    
-    Args:
-        protein_id: UniProt ID
-    
-    Returns:
-        STRING interaction score or default value if not found
-    """
-    if not os.path.exists(STRING_PATH):
-        return np.nan
-    
-    try:
-        df = pd.read_csv(STRING_PATH, sep='\t', names=["ID", "STRING"], header=None)
-        match = df[df['ID'] == protein_id]
-        if not match.empty:
-            return float(match.iloc[0]['STRING'])
-    except Exception as e:
-        pass
-    
-    return np.nan
 
 
 def _process_variant_worker(args):
@@ -1009,30 +958,15 @@ def generate_features_for_variants(
                 continue
     
     df = pd.DataFrame(rows)
-    
-    # Debug: print raw features before transformation
-    if DEBUG:
-        print(f"\n    DEBUG Raw features before transformation:")
-        for _, row in df.iterrows():
-            print(f"      {row['ID']} {row['Variation']}:")
-            print(f"        PASTML_raw={row['PASTML']}")
-            print(f"        AF_raw={row['AF']}")
-            print(f"        STRING_raw={row['STRING']}")
-            print(f"        ANNOTATIONS={row['ANNOTATIONS']}")
-        print(df)
 
-    df['STRING'] = df['STRING'].fillna(0.05996573865027195)
     df['PASTML'] = transform_log2_minmax(df['PASTML'], PARAM_PASTML)
     df['AF'] = transform_log2_minmax(df['AF'], PARAM_AF)
     df['STRING'] = transform_log2_minmax(df['STRING'], PARAM_STRING)
+    
+    df['PASTML'] = df['PASTML'].fillna(0.5479275667193408)
+    df['STRING'] = df['STRING'].fillna(0.6740500188415028)
     df['AF'] = df['AF'].fillna(0)
 
-    # Debug: print transformed features
-    if DEBUG:
-        print(f"\n    DEBUG Transformed features:")
-        for _, row in df.iterrows():
-            print(f"      {row['ID']} {row['Variation']}: PASTML={row['PASTML']}, AF={row['AF']}, STRING={row['STRING']}")
-    
     return df
 
 
@@ -1360,13 +1294,6 @@ def truncate_sequence_for_mutation(sequence: str, mutation: str, window_size: in
     
     # Calculate adjusted position in truncated sequence (1-based)
     adjusted_position = seq_pos - start + 1
-    if DEBUG:
-        try:
-            print(f"DEBUG Truncate: mutation={mutation} len_orig={len_seq} start={start} end={end} len_trunc={len(truncated_sequence)} adjusted_pos={adjusted_position}")
-            print(f"DEBUG Truncated sequence: {truncated_sequence}")
-        except Exception:
-            pass
-
     return truncated_sequence, adjusted_position, start
 
 
@@ -1452,9 +1379,7 @@ def embed_sequence(sequence: str, model, tokenizer, model_name: str, device: tor
         embeddings = model(input_ids=input_ids, attention_mask=attention_mask).last_hidden_state
         seq_len = (attention_mask[0] == 1).sum()
         clean_emb = embeddings[0][:seq_len-1]
-        if DEBUG:
-            np.save("debug_ankh2_embedding.npy", clean_emb.cpu().numpy())
-        
+
         # Verify embedding length matches sequence length
         if clean_emb.shape[0] != len(sequence):
             raise ValueError(f"Ankh2 embedding length {clean_emb.shape[0]} != sequence length {len(sequence)}")
@@ -1475,8 +1400,6 @@ def embed_sequence(sequence: str, model, tokenizer, model_name: str, device: tor
         attention_mask = outputs['attention_mask']
         seq_len = attention_mask[0].sum().item()
         clean_emb = embeddings[0][1:seq_len-1]
-        if DEBUG:
-            np.save("debug_esmc_embedding.npy", clean_emb.cpu().numpy())
         # Verify embedding length matches sequence length
         if clean_emb.shape[0] != len(sequence):
             raise ValueError(f"ESMC embedding length {clean_emb.shape[0]} != sequence length {len(sequence)}")
@@ -1551,14 +1474,6 @@ def run_pathos_inference(
             continue
         
         feat_data = features_lookup[feat_key]
-        
-        # Debug: print features for this variant
-        if DEBUG:
-            print(f"\n    DEBUG Features for {protein_id} {mutation}:")
-            print(f"      PASTML: {feat_data['PASTML']}")
-            print(f"      AF: {feat_data['AF']}")
-            print(f"      STRING: {feat_data['STRING']}")
-            print(f"      ANNOTATIONS: {feat_data['ANNOTATIONS']}")
 
         for plm_name in PLM_MODELS:
             if plm_name == "esmc_600m":
@@ -1575,11 +1490,6 @@ def run_pathos_inference(
             mut_emb = embeddings[mut_key]
             wt_emb = embeddings[wt_key]
 
-            # Debug: print embedding sums
-            if DEBUG:
-                print(f"      {plm_name} wt_emb sum: {wt_emb.sum().item()}")
-                print(f"      {plm_name} mut_emb sum: {mut_emb.sum().item()}")
-
             # Build feature vector
             features = torch.tensor([
                 feat_data['PASTML'],
@@ -1590,16 +1500,10 @@ def run_pathos_inference(
             input_features = torch.cat([mut_emb, wt_emb, features]).unsqueeze(0).to(device)
 
             with torch.no_grad():
-                score = models[plm_name](input_features).item()
-                if DEBUG:
-                    print(f"      {plm_name} score: {score}")
-                scores.append(score)
+                scores.append(models[plm_name](input_features).item())
 
         if scores:
-            final_score = np.mean(scores)
-            if DEBUG:
-                print(f"      Final averaged score: {final_score}")
-            predictions[(protein_id, mutation)] = final_score
+            predictions[(protein_id, mutation)] = np.mean(scores)
     
     return predictions
 
@@ -1700,81 +1604,45 @@ def process_variants_batched(
         
         return embeddings
     
-    # Load and process with ESMC first
+    # Load both PLM models at once
     print(f"    Loading ESMC...")
     esmc_model, esmc_tokenizer = load_plm_model("esmc_600m", gpu_device)
-    print(f"    Running ESMC...")
-    
-    for batch_idx in tqdm(range(n_batches), desc="    ESMC batches", leave=False):
-        start_idx = batch_idx * batch_size
-        end_idx = min(start_idx + batch_size, len(variants_to_process))
-        batch_variants = variants_to_process[start_idx:end_idx]
-        
-        batch_embeddings = {"esmc_600m": generate_embeddings_for_plm("esmc_600m", batch_variants, esmc_model, esmc_tokenizer)}
-        
-        # Store ESMC embeddings temporarily
-        if not hasattr(generate_embeddings_for_plm, 'esmc_embeddings'):
-            generate_embeddings_for_plm.esmc_embeddings = {}
-        generate_embeddings_for_plm.esmc_embeddings.update(batch_embeddings["esmc_600m"])
-    
-    # Unload ESMC, clear GPU memory
-    del esmc_model, esmc_tokenizer
-    torch.cuda.empty_cache() if torch.cuda.is_available() else None
-    gc.collect()
-    
-    # Clear ESMC entries from WT cache
-    wt_cache = {k: v for k, v in wt_cache.items() if k[0] != "esmc_600m"}
-    
-    # Load and process with Ankh2
     print(f"    Loading Ankh2...")
     ankh_model, ankh_tokenizer = load_plm_model("ankh2_large", gpu_device)
-    print(f"    Running Ankh2...")
-    
-    for batch_idx in tqdm(range(n_batches), desc="    Ankh2 batches", leave=False):
+    plm_models = {
+        "esmc_600m": (esmc_model, esmc_tokenizer),
+        "ankh2_large": (ankh_model, ankh_tokenizer),
+    }
+
+    # Process each batch end-to-end: ESMC emb → Ankh2 emb → PATHOS inference
+    for batch_idx in tqdm(range(n_batches), desc="    Batches", leave=False):
         start_idx = batch_idx * batch_size
         end_idx = min(start_idx + batch_size, len(variants_to_process))
         batch_variants = variants_to_process[start_idx:end_idx]
-        
-        ankh_embeddings = generate_embeddings_for_plm("ankh2_large", batch_variants, ankh_model, ankh_tokenizer)
-        
-        # Combine with stored ESMC embeddings for this batch
-        batch_embeddings = {
-            "esmc_600m": {k: v for k, v in generate_embeddings_for_plm.esmc_embeddings.items() 
-                         if any(f"{p}_{m}" in k for p, m in batch_variants)},
-            "ankh2_large": ankh_embeddings
-        }
-        
+
+        # Generate embeddings for both PLMs on this batch
+        batch_embeddings = {}
+        for plm_name in PLM_MODELS:
+            model, tokenizer = plm_models[plm_name]
+            batch_embeddings[plm_name] = generate_embeddings_for_plm(plm_name, batch_variants, model, tokenizer)
+
         # Run PATHOS inference for this batch
         for protein_id, mutation in batch_variants:
             feat_key = (protein_id, mutation)
-            
             if feat_key not in features_lookup:
                 continue
-            
+
             feat_data = features_lookup[feat_key]
             scores = []
-            
-            # Debug: print features for this variant
-            if DEBUG:
-                print(f"\n    DEBUG Features for {protein_id} {mutation}:")
-                print(f"      PASTML: {feat_data['PASTML']}")
-                print(f"      AF: {feat_data['AF']}")
-                print(f"      STRING: {feat_data['STRING']}")
-                print(f"      ANNOTATIONS: {feat_data['ANNOTATIONS']}")
 
             for plm_name in PLM_MODELS:
                 wt_key = f"{protein_id}_{mutation}_wt"
                 mut_key = f"{protein_id}_{mutation}_mut"
-
                 if wt_key not in batch_embeddings[plm_name] or mut_key not in batch_embeddings[plm_name]:
                     continue
 
                 wt_emb = batch_embeddings[plm_name][wt_key]
                 mut_emb = batch_embeddings[plm_name][mut_key]
-
-                if DEBUG:
-                    print(f"      {plm_name} wt_emb sum: {wt_emb.sum().item()}")
-                    print(f"      {plm_name} mut_emb sum: {mut_emb.sum().item()}")
 
                 features = torch.tensor([
                     feat_data['PASTML'],
@@ -1785,26 +1653,20 @@ def process_variants_batched(
                 input_features = torch.cat([mut_emb, wt_emb, features]).unsqueeze(0).to(gpu_device)
 
                 with torch.no_grad():
-                    score = pathos_models[plm_name](input_features).item()
-                if DEBUG:
-                    print(f"      {plm_name} score: {score}")
-                scores.append(score)
+                    scores.append(pathos_models[plm_name](input_features).item())
 
             if scores:
-                final_score = np.mean(scores)
-                if DEBUG:
-                    print(f"      Final averaged score: {final_score}")
-                all_predictions[(protein_id, mutation)] = final_score
-        
-        # Clear batch embeddings for this Ankh2 batch
-        del batch_embeddings, ankh_embeddings
+                all_predictions[(protein_id, mutation)] = np.mean(scores)
+
+        # Free batch embeddings
+        del batch_embeddings
         gc.collect()
-    
-    # Cleanup: unload PLM models and clear cache
-    del ankh_model, ankh_tokenizer, wt_cache
-    if hasattr(generate_embeddings_for_plm, 'esmc_embeddings'):
-        del generate_embeddings_for_plm.esmc_embeddings
-    del pathos_models
+
+        print(f"    Batch {batch_idx+1}/{n_batches} done — {len(all_predictions)} predictions so far")
+
+    # Cleanup
+    del esmc_model, esmc_tokenizer, ankh_model, ankh_tokenizer, plm_models
+    del wt_cache, pathos_models
     torch.cuda.empty_cache() if torch.cuda.is_available() else None
     gc.collect()
     
@@ -1924,20 +1786,11 @@ def main():
         help="Enable de novo full protein scan (required when protein is not in database). Warning: this can take a very long time."
     )
     parser.add_argument(
-        "--force",
+        "--precomputed",
         action="store_true",
-        help="Force de novo prediction even for variants in database (for debugging)"
+        help="Only retrieve precomputed predictions from the database, skip de novo computation"
     )
-    parser.add_argument(
-        "--debug",
-        action="store_true",
-        help="Enable debug prints and save intermediate .npy embeddings"
-    )
-
     args = parser.parse_args()
-
-    global DEBUG
-    DEBUG = args.debug
 
     # Validate input arguments: need either --protein or --file
     if not args.protein and not args.file:
@@ -1977,21 +1830,6 @@ def main():
     
     if not os.path.exists(DB_PATH):
         print(f"ERROR: Database not found: {DB_PATH}")
-        print(f"       Run setup_pathos.sh to download the database.")
-        sys.exit(1)
-    
-    if not os.path.exists(FASTA_PATH):
-        print(f"ERROR: FASTA file not found: {FASTA_PATH}")
-        print(f"       Run setup_pathos.sh to download the database.")
-        sys.exit(1)
-    
-    if not os.path.exists(MODELS_FOLDER):
-        print(f"ERROR: Models folder not found: {MODELS_FOLDER}")
-        print(f"       Run setup_pathos.sh to download the models.")
-        sys.exit(1)
-    
-    if not os.path.exists(AF_SQLITE_PATH):
-        print(f"ERROR: Allele frequency database not found: {AF_SQLITE_PATH}")
         print(f"       Run setup_pathos.sh to download the database.")
         sys.exit(1)
     
@@ -2096,30 +1934,42 @@ def main():
     
     unique_proteins = list(set([protein_id for protein_id, _ in variants]))
     
-    if args.force:
-        # Force mode: skip database, predict all variants de novo
-        db_results = {(p, m): None for p, m in variants}
-        variants_in_db = []
-        variants_to_process = list(variants)
-    else:
-        db_results = query_database(DB_PATH, variants)
-        variants_in_db = [(p, m) for (p, m) in variants if db_results[(p, m)] is not None]
-        variants_to_process = [(p, m) for (p, m) in variants if db_results[(p, m)] is None]
-    
+    db_results = query_database(DB_PATH, variants)
+    variants_in_db = [(p, m) for (p, m) in variants if db_results[(p, m)] is not None]
+    variants_to_process = [(p, m) for (p, m) in variants if db_results[(p, m)] is None]
+
     if len(unique_proteins) == 1:
         print(f"    Total: {len(variants)} variants")
     else:
         print(f"    Total: {len(variants)} variants across {len(unique_proteins)} proteins")
-    
-    if args.force:
-        print(f"    Force mode: predicting all {len(variants_to_process)} variants de novo")
+
+    if args.precomputed:
+        print(f"    Precomputed mode: {len(variants_in_db)} found in database, {len(variants_to_process)} skipped (no de novo)")
+        variants_to_process = []
     else:
         print(f"    {len(variants_in_db)} found in database, {len(variants_to_process)} need de novo prediction")
-    
+
     new_predictions = {}
     valid_variants = list(variants)  # Start with all variants
-    
+
     if variants_to_process:
+        de_novo_paths = {
+            "FASTA": FASTA_PATH,
+            "Phylogenetic tree": TREE_PATH,
+            "MSA folder": MSA_FOLDER,
+            "Mammals DB": MAMMALS_DB,
+            "Models folder": MODELS_FOLDER,
+            "AF database": AF_SQLITE_PATH,
+        }
+        missing = [name for name, path in de_novo_paths.items() if not os.path.exists(path)]
+        if missing:
+            print(f"\nERROR: De novo prediction requires additional files that are not present:")
+            for name in missing:
+                print(f"  {name}: {de_novo_paths[name]}")
+            print(f"\nRun './setup_pathos.sh all' to download all required files.")
+            sys.exit(1)
+        _load_de_novo_deps()
+
         # Step 2: Load UniProt sequences
         proteins_to_load = list(set([p for p, m in variants_to_process]))
         print(f"\n[2/{total_steps}] Loading UniProt sequences for {len(proteins_to_load)} proteins...")
@@ -2153,7 +2003,6 @@ def main():
                 FASTA_FOLDER,
                 MAMMALS_DB,
                 mem_limit=args.mmseqs_mem_limit,
-                debug=False
             )
             
             if generated_msas:
