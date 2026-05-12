@@ -56,7 +56,15 @@ def _load_de_novo_deps():
     global T5EncoderModel, AutoTokenizer, AutoModelForMaskedLM
     global Tree, pastml_pipeline, DEVICE, FC_model
 
-    import torch as _torch
+    try:
+        import torch as _torch
+    except (ImportError, ValueError, OSError) as e:
+        print(f"\nERROR: Failed to load PyTorch: {e}")
+        print(f"       The installed PyTorch requires CUDA libraries that are not available on this system.")
+        print(f"       Install a CPU-only build with:")
+        print(f"         pip install torch --index-url https://download.pytorch.org/whl/cpu")
+        sys.exit(1)
+
     import torch.nn as _nn
     from torch.utils.data import DataLoader as _DL, Dataset as _DS
     from safetensors import safe_open as _so
@@ -1953,30 +1961,13 @@ def main():
     valid_variants = list(variants)  # Start with all variants
 
     if variants_to_process:
-        de_novo_paths = {
-            "FASTA": FASTA_PATH,
-            "Phylogenetic tree": TREE_PATH,
-            "MSA folder": MSA_FOLDER,
-            "Mammals DB": MAMMALS_DB,
-            "Models folder": MODELS_FOLDER,
-            "AF database": AF_SQLITE_PATH,
-        }
-        missing = [name for name, path in de_novo_paths.items() if not os.path.exists(path)]
-        if missing:
-            print(f"\nERROR: De novo prediction requires additional files that are not present:")
-            for name in missing:
-                print(f"  {name}: {de_novo_paths[name]}")
-            print(f"\nRun './setup_pathos.sh all' to download all required files.")
-            sys.exit(1)
-        _load_de_novo_deps()
-
-        # Step 2: Load UniProt sequences
+        # Step 2: Load sequences — FASTA is always available, no heavy deps needed
         proteins_to_load = list(set([p for p, m in variants_to_process]))
         print(f"\n[2/{total_steps}] Loading UniProt sequences for {len(proteins_to_load)} proteins...")
         sequences = load_fasta_sequences(FASTA_PATH, protein_ids=proteins_to_load)
         print(f"    Loaded {len(sequences)} sequences from FASTA")
-        
-        # Step 3: Validate mutations against sequences
+
+        # Step 3: Validate mutations — do this before loading anything heavy
         print(f"\n[3/{total_steps}] Validating mutations against UniProt sequences...")
         validated_variants = []
         invalid_count = 0
@@ -1987,11 +1978,30 @@ def main():
             else:
                 invalid_count += 1
         print(f"    {len(validated_variants)} valid, {invalid_count} invalid (sequence mismatch)")
-        
+
         if not validated_variants:
-            print("WARNING: No valid variants to predict de novo.")
+            print("    No valid variants to predict de novo.")
+            variants_to_process = []
         else:
             variants_to_process = validated_variants
+
+            # Check required files before loading torch or any other heavy dep
+            de_novo_paths = {
+                "Phylogenetic tree": TREE_PATH,
+                "MSA folder": MSA_FOLDER,
+                "Mammals DB": MAMMALS_DB,
+                "Models folder": MODELS_FOLDER,
+                "AF database": AF_SQLITE_PATH,
+            }
+            missing = [name for name, path in de_novo_paths.items() if not os.path.exists(path)]
+            if missing:
+                print(f"\nERROR: De novo prediction requires additional files that are not present:")
+                for name in missing:
+                    print(f"  {name}: {de_novo_paths[name]}")
+                print(f"\nRun './setup_pathos.sh all' to download all required files.")
+                sys.exit(1)
+
+            _load_de_novo_deps()
             
             # Check and generate MSAs for all proteins (PASTML is always enabled)
             proteins_needing_msa = list(set([p for p, _ in variants_to_process]))
