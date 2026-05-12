@@ -2139,9 +2139,11 @@ def main():
         print(f"  Total time: {total_time:.1f}s")
         print(f"{'='*60}")
         
-        # Print final CSV (only if there are results)
         if all_results:
-            print(f"\n{pd.read_csv(args.output).head(50).to_string(index=False)}")
+            df_out = pd.read_csv(args.output)
+            print(f"\nPreview (first {min(50, len(df_out))} of {len(df_out)} results):")
+            print(df_out.head(50).to_string(index=False))
+            print(f"\nFull results saved to: {args.output}")
         else:
             print("\nNo results to display.")
 
