@@ -499,6 +499,20 @@ def compute_pastml_score(protein_id: str, mutation: str, msa_folder: str,
 # ============================================================================
 
 
+def fetch_uniprot_sequence(protein_id: str) -> Optional[str]:
+    """Fetch protein sequence from UniProt REST API, return None on failure"""
+    try:
+        url = f"https://rest.uniprot.org/uniprotkb/{protein_id}.fasta"
+        response = requests.get(url, timeout=30)
+        if response.status_code == 200:
+            lines = response.text.strip().split('\n')
+            seq = ''.join(line for line in lines if not line.startswith('>'))
+            return seq if seq else None
+        return None
+    except Exception:
+        return None
+
+
 def download_gff_from_uniprot(protein_id: str, output_path: str) -> bool:
     """Download GFF annotation file from UniProt API
     
@@ -1965,7 +1979,28 @@ def main():
         proteins_to_load = list(set([p for p, m in variants_to_process]))
         print(f"\n[2/{total_steps}] Loading UniProt sequences for {len(proteins_to_load)} proteins...")
         sequences = load_fasta_sequences(FASTA_PATH, protein_ids=proteins_to_load)
-        print(f"    Loaded {len(sequences)} sequences from FASTA")
+        print(f"    Loaded {len(sequences)} sequences from local FASTA")
+
+        # Fetch sequences for proteins absent from local FASTA (new UniProt entries)
+        missing_from_fasta = [p for p in proteins_to_load if p not in sequences]
+        if missing_from_fasta:
+            print(f"    {len(missing_from_fasta)} protein(s) not in local FASTA — fetching from UniProt API...")
+            if not os.path.exists(AF_SQLITE_PATH):
+                print(f"\nERROR: De novo prediction for new proteins requires the allele frequency database:")
+                print(f"  AF database: {AF_SQLITE_PATH}")
+                print(f"\nRun './setup_pathos.sh all' to download all required files.")
+                sys.exit(1)
+            os.makedirs(FASTA_FOLDER, exist_ok=True)
+            for protein_id in missing_from_fasta:
+                seq = fetch_uniprot_sequence(protein_id)
+                if seq:
+                    sequences[protein_id] = seq
+                    fasta_out = os.path.join(FASTA_FOLDER, f"{protein_id}.fasta")
+                    with open(fasta_out, 'w') as f:
+                        f.write(f">{protein_id}\n{seq}\n")
+                    print(f"    Fetched {protein_id} ({len(seq)} aa) and saved to fastas/")
+                else:
+                    print(f"    WARNING: Could not fetch {protein_id} from UniProt — skipping")
 
         # Step 3: Validate mutations — do this before loading anything heavy
         print(f"\n[3/{total_steps}] Validating mutations against UniProt sequences...")
