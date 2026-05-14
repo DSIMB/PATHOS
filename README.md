@@ -2,6 +2,19 @@
 
 PATHOS predicts pathogenicity of protein variants using protein language models (ESM-C 600M, Ankh2 Large). Precomputed scores for 216M mutations across 20,416 human proteins.
 
+## Contents
+
+- [Installation](#installation)
+- [Quick start](#quick-start)
+- [How it works](#how-it-works)
+- [Output](#output)
+- [Score interpretation](#score-interpretation)
+- [Command-line options](#command-line-options)
+- [Full protein scan](#full-protein-scan)
+- [PLM embeddings](#plm-embeddings)
+- [Citation](#citation)
+- [Contact](#contact)
+
 ## Installation
 
 ```bash
@@ -146,7 +159,7 @@ Full list of available options for `run_pathos.py`.
 
 ## Full protein scan
 
-PATHOS can predict scores for all possible mutations of a protein (19 substitutions × sequence length).
+PATHOS can predict scores for all possible mutations of a protein (19 substitutions x sequence length).
 
 ### Proteins in the database
 
