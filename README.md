@@ -43,7 +43,7 @@ If you need de novo prediction for proteins absent from the database (very large
 
 | Mode | Size |
 |------|------|
-| Default (`pathos.db` only) | ~10 GB |
+| Default (`pathos.db` only) | ~12 GB |
 | Full (`all`) | ~35 GB |
 
 
