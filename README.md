@@ -1,6 +1,6 @@
 # PATHOS - Predicting variant pathogenicity by combining Protein Language Models and biological features
 
-PATHOS predicts pathogenicity of protein variants using protein language models (ESM-C 600M, Ankh2 Large). Precomputed scores for 216M mutations across 20,416 human proteins.
+PATHOS predicts pathogenicity of protein variants using protein language models (ESM-C 600M, Ankh2 Large). It provides precomputed scores for all possible missense substitutions across 20,416 human proteins, covering 216 million mutations in total. The underlying PLM embeddings for all 216 million mutations (682 million embeddings in total across three models) are publicly available on Hugging Face.
 
 ## Contents
 
