@@ -13,7 +13,7 @@ conda activate PATHOS_env
 
 By default the script downloads only `pathos.db` (~10 GB), which is sufficient to run predictions for all 20,416 precomputed proteins. This covers the vast majority of use cases.
 
-If you need de novo prediction for proteins absent from the database (very large proteins, or proteins added to UniProt after March 2025), run with the `all` argument to also download the allele frequency database, MSA alignments, and the mmseqs2 mammalian database:
+If you need de novo prediction for proteins absent from the database (very large proteins, or proteins added to UniProt after March 2025), run with the `all` argument to also download the allele frequency database, MSA alignments, and the mmseqs2 mammalian database. mmseqs2 is included in the conda environment (from bioconda) and installed automatically by `setup_pathos.sh`.
 
 ```bash
 ./setup_pathos.sh all
@@ -109,6 +109,14 @@ Results are displayed in the terminal and exported to CSV with the following col
 - PATHOS score (0-1)
 - Classification (Benign/Pathogenic)
 
+The precomputed database (`pathos.db`) is a SQLite file and can be queried directly with any SQLite-compatible tool:
+
+```sql
+-- Table: mutations
+-- Columns: protein_id TEXT, mutation TEXT, score REAL
+SELECT score FROM mutations WHERE protein_id = 'P04637' AND mutation = 'R175H';
+```
+
 ## Score interpretation
 
 PATHOS outputs a score between 0 and 1 indicating the probability of pathogenicity.
@@ -175,7 +183,9 @@ The dataset covers three protein language models:
 | ESM-2 650M | 1280 | 216.2M | 11.4M | 2.10 TiB |
 | Ankh2 Large | 1536 | 216.2M | 11.4M | 2.51 TiB |
 
-Each row stores a position-specific embedding (`emb`) extracted at the mutated or wild-type residue, along with a mean-pooled full-sequence embedding (`mean`). Files are in Parquet format distributed across shards.
+Across all three models this represents 682 million embeddings totalling 6.5 TB. PATHOS itself uses ESM-C 600M and Ankh2 Large internally; ESM-2 650M embeddings were generated alongside the others and are provided here for the community.
+
+Each row stores a position-specific embedding (`emb`) extracted at the mutated or wild-type residue, along with a mean-pooled full-sequence embedding (`mean`) that encodes global sequence-level information and can be used directly as a compact protein representation. For proteins longer than 1024 residues, embeddings were generated using a window of 1024 residues centered on the mutated position. Files are in Parquet format distributed across shards.
 
 ```python
 from datasets import load_dataset
@@ -199,12 +209,14 @@ df = duckdb.sql("""
 """).df()
 ```
 
-Having precomputed embeddings for every possible human missense substitution opens several downstream uses beyond pathogenicity prediction:
+The embeddings can be downloaded from Hugging Face and used independently of PATHOS. Typical use cases include:
 
-- **Training and benchmarking variant effect predictors** without running PLMs at inference time. The embeddings serve as fixed input features for any supervised or self-supervised model, cutting compute costs significantly for large-scale training.
-- **Studying mutational landscapes** of individual proteins or protein families. Comparing wild-type and mutant embeddings per position gives a residue-level view of how each substitution shifts the sequence representation, which correlates with structural and functional sensitivity.
-- **Clustering variants by embedding similarity** to identify functionally equivalent substitutions or to stratify variants before downstream analysis.
-- **Exploring the geometry of pathogenic versus benign variants** in embedding space, which can reveal model-agnostic signatures of deleteriousness shared across proteins.
+- Training your own variant effect predictor using protein language model embeddings as input features
+- Investigating the effect of mutations on protein-protein interactions
+- Studying how mutations affect protein stability or conformational changes
+- Linking mutation embedding patterns to disease classes or clinical outcomes
+- Identifying evolutionary constraints: positions that tolerate substitutions vs invariant residues
+- Predicting mutations that confer drug resistance
 
 Each PLM configuration inherits the license of its source model: MIT for ESM-2, CC BY-NC-SA 4.0 for Ankh2, and the Cambrian Non-Commercial license for ESM-C. Non-commercial restrictions apply when using the Ankh2 or ESM-C configs.
 
