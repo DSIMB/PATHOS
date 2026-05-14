@@ -33,31 +33,39 @@ conda env create -f env/PATHOS_env.yml
 
 
 # Function to download and verify file integrity
+# Skips download if the file already exists in DATABASE_DIR with a correct MD5
 download_and_verify() {
     local url=$1
     local filename=$2
     local expected_md5=$3
+    local dest="$DATABASE_DIR/$filename"
 
     echo "Processing $filename..."
 
-    # Check if file already exists and has correct MD5
-    if [ -f "$filename" ]; then
-        echo "File $filename already exists. Verifying integrity..."
-        actual_md5=$(md5sum "$filename" | cut -d ' ' -f 1)
+    # Check if already installed in DATABASE_DIR
+    if [ -f "$dest" ]; then
+        actual_md5=$(md5sum "$dest" | cut -d ' ' -f 1)
         if [ "$actual_md5" = "$expected_md5" ]; then
-            echo "Integrity verified for $filename. Skipping download."
+            echo "$filename already present and verified. Skipping download."
             return 0
         else
-            echo "Integrity check failed for existing $filename. Re-downloading..."
+            echo "Integrity check failed for existing $dest. Re-downloading..."
         fi
     fi
 
-    # Download file
-    echo "Downloading $filename..."
+    # Check if partially downloaded in current directory
+    if [ -f "$filename" ]; then
+        actual_md5=$(md5sum "$filename" | cut -d ' ' -f 1)
+        if [ "$actual_md5" = "$expected_md5" ]; then
+            echo "$filename already downloaded. Skipping."
+            return 0
+        else
+            echo "Resuming download of $filename..."
+        fi
+    fi
+
     wget -c "$url" -O "$filename"
 
-    # Verify integrity
-    echo "Verifying integrity of $filename..."
     actual_md5=$(md5sum "$filename" | cut -d ' ' -f 1)
     if [ "$actual_md5" = "$expected_md5" ]; then
         echo "Integrity verified for $filename."
@@ -71,17 +79,17 @@ download_and_verify() {
 echo "Downloading database files from Zenodo..."
 
 # pathos.db — always downloaded
-download_and_verify "https://zenodo.org/records/18910504/files/pathos.db?download=1" "pathos.db" "886dc2ace433fee959fc575cc4841652"
+download_and_verify "https://zenodo.org/records/20189718/files/pathos.db?download=1" "pathos.db" "886dc2ace433fee959fc575cc4841652"
 
 if [ "$DOWNLOAD_ALL" = true ]; then
     # mmseqs_db.zip (2.3 GB)
-    download_and_verify "https://zenodo.org/records/18910504/files/mmseqs_db.zip?download=1" "mmseqs_db.zip" "c6fea1cc063445a951468328b905031a"
+    download_and_verify "https://zenodo.org/records/20189718/files/mmseqs_db.zip?download=1" "mmseqs_db.zip" "c6fea1cc063445a951468328b905031a"
 
     # MSAs.zip (1.0 GB)
-    download_and_verify "https://zenodo.org/records/18910504/files/MSAs.zip?download=1" "MSAs.zip" "5cbfcc3efd622afe92fcdda49104e8d8"
+    download_and_verify "https://zenodo.org/records/20189718/files/MSAs.zip?download=1" "MSAs.zip" "5cbfcc3efd622afe92fcdda49104e8d8"
 
     # af_index.sqlite (1.4 GB)
-    download_and_verify "https://zenodo.org/records/18910504/files/af_index.sqlite?download=1" "af_index.sqlite" "63a8e133b56ce22699076562975cff34"
+    download_and_verify "https://zenodo.org/records/20189718/files/af_index.sqlite?download=1" "af_index.sqlite" "63a8e133b56ce22699076562975cff34"
 fi
 
 # 3. Extract zip archives and move files
