@@ -109,7 +109,7 @@ Q9Y6X3,M1C
 
 ## How it works
 
-Most queries are served instantly from the precomputed database (216M mutations, 20,416 human proteins). De novo prediction is only needed for proteins absent from the database: very large proteins that exceed the model input length, and proteins added to UniProt after March 2025 (the version used to build the database, `uniprotsp_human_20032025_can_isoforms.fasta`), such as I3L3L1.
+Most queries are served instantly from the precomputed database (216M mutations, 20,416 human proteins). De novo prediction is only needed for proteins absent from the database: very large proteins and proteins added to UniProt after March 2025 (the version used to build the database, `uniprotsp_human_20032025_can_isoforms.fasta`), such as I3L3L1.
 
 For variants not in the database, PATHOS performs de novo prediction:
 
@@ -120,6 +120,15 @@ For variants not in the database, PATHOS performs de novo prediction:
 5. Generate embeddings with ESMC 600M and Ankh2 Large
 6. Run PATHOS inference (ensemble of both models)
 
+The precomputed database (`pathos.db`) is a SQLite file and can be queried directly with any SQLite-compatible tool:
+
+```sql
+-- Table: mutations
+-- Columns: protein_id TEXT, mutation TEXT, score REAL
+SELECT score FROM mutations WHERE protein_id = 'P04637' AND mutation = 'R175H';
+```
+
+
 ## Output
 
 Results are displayed in the terminal and exported to CSV with the following columns:
@@ -129,13 +138,6 @@ Results are displayed in the terminal and exported to CSV with the following col
 - PATHOS score (0-1)
 - Classification (Benign/Pathogenic)
 
-The precomputed database (`pathos.db`) is a SQLite file and can be queried directly with any SQLite-compatible tool:
-
-```sql
--- Table: mutations
--- Columns: protein_id TEXT, mutation TEXT, score REAL
-SELECT score FROM mutations WHERE protein_id = 'P04637' AND mutation = 'R175H';
-```
 
 ## Score interpretation
 
