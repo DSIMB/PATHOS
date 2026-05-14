@@ -1,6 +1,7 @@
 name: PATHOS_env
 channels:
   - nvidia
+  - bioconda
   - conda-forge
 dependencies:
   - python=3.12.8
@@ -9,6 +10,7 @@ dependencies:
   - ninja
   - git
   - pyarrow
+  - mmseqs2
   - pip
   - pip:
     - torch==2.6.0
