@@ -2,6 +2,8 @@
 
 PATHOS predicts pathogenicity of protein variants using protein language models (ESM-C 600M, Ankh2 Large). It provides precomputed scores for all possible missense substitutions across 20,416 human proteins, covering 216 million mutations in total. The underlying PLM embeddings for all 216 million mutations (682 million embeddings in total across three models) are publicly available on Hugging Face.
 
+Paper: http://dx.doi.org/10.1016/j.ailsci.2026.100165
+
 ## Contents
 
 - [Installation](#installation)
@@ -247,7 +249,7 @@ Each PLM configuration inherits the license of its source model: MIT for ESM-2, 
 If you use PATHOS or PLM embeddings in your research, please cite:
 
 Radjasandirane, R., Cretin, G., Diharce, J., de Brevern, A. G., & Gelly, J. C. (2026). PATHOS: Predicting Variant Pathogenicity by Combining Protein Language Models and Biological Features. Artificial Intelligence in the Life Sciences, 100165.
-
+http://dx.doi.org/10.1016/j.ailsci.2026.100165
 
 ## Contact
 
